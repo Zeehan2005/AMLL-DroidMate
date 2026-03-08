@@ -7,6 +7,7 @@
 ![Image](https://github.com/user-attachments/assets/c2cce2b5-a6cb-469f-9af9-6ca9eaaeb146)
 ![Image](https://github.com/user-attachments/assets/7d7a3ab4-7a95-4cf9-bceb-f54aef6a4314)
 ![Image](https://github.com/user-attachments/assets/59faa67c-92b5-477e-8685-272319945189)
+https://github.com/user-attachments/assets/974c3c46-d964-41d8-bcd7-521f94c276b9
 
 ## ✨ 核心特性
 
