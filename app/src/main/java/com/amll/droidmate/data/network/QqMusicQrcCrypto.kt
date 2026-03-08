@@ -15,7 +15,12 @@ object QqMusicQrcCrypto {
     private val codec = QqMusicCodec()
 
     fun decryptQrcHex(encryptedText: String): String {
+        android.util.Log.d("QqMusicQrcCrypto", "Starting Hex+3DES+Zlib decryption, input length: ${encryptedText.length}")
+        android.util.Log.d("QqMusicQrcCrypto", "Input preview (first 200 chars): ${encryptedText.take(200)}")
+        
         val encryptedBytes = decodeHex(encryptedText)
+        android.util.Log.d("QqMusicQrcCrypto", "After Hex decode: ${encryptedBytes.size} bytes")
+        
         require(encryptedBytes.size % DES_BLOCK_SIZE == 0) {
             "Encrypted data length must be a multiple of $DES_BLOCK_SIZE"
         }
@@ -26,20 +31,29 @@ object QqMusicQrcCrypto {
             codec.decryptBlock(encryptedBytes, offset, decrypted, offset)
             offset += DES_BLOCK_SIZE
         }
+        
+        android.util.Log.d("QqMusicQrcCrypto", "After 3DES decrypt: ${decrypted.size} bytes, first 32 bytes: ${decrypted.take(32).joinToString(",") { "%02X".format(it) }}")
+        android.util.Log.w("QqMusicQrcCrypto", "WARNING: Valid Zlib data should start with 0x78 (120), but first byte is: 0x${"%02X".format(decrypted[0])} (${decrypted[0].toInt() and 0xFF})")
 
         val decompressed = decompress(decrypted)
+        android.util.Log.d("QqMusicQrcCrypto", "After Zlib decompress: ${decompressed.size} bytes")
+        android.util.Log.d("QqMusicQrcCrypto", "Decompressed preview (first 200 chars): ${String(decompressed.take(200).toByteArray(), Charsets.UTF_8)}")
+        
         val payload = if (
             decompressed.size >= 3 &&
             decompressed[0] == 0xEF.toByte() &&
             decompressed[1] == 0xBB.toByte() &&
             decompressed[2] == 0xBF.toByte()
         ) {
+            android.util.Log.d("QqMusicQrcCrypto", "UTF-8 BOM detected, removing first 3 bytes")
             decompressed.copyOfRange(3, decompressed.size)
         } else {
             decompressed
         }
 
-        return payload.toString(Charsets.UTF_8)
+        val result = payload.toString(Charsets.UTF_8)
+        android.util.Log.d("QqMusicQrcCrypto", "Final result length: ${result.length}, preview (first 300 chars): ${result.take(300)}")
+        return result
     }
 
     private fun decodeHex(value: String): ByteArray {
@@ -92,7 +106,7 @@ object QqMusicQrcCrypto {
         )
         private val SBOX2 = intArrayOf(
             15,1,8,14,6,11,3,4,9,7,2,13,12,0,5,10,
-            3,13,4,7,15,2,8,15,12,0,1,10,6,9,11,5,
+            3,13,4,7,15,2,8,14,12,0,1,10,6,9,11,5,  // 修复：第8个数从 15 改为 14
             0,14,7,11,10,4,13,1,5,8,12,6,9,3,2,15,
             13,8,10,1,3,15,4,2,11,6,7,12,0,5,14,9
         )
@@ -230,14 +244,22 @@ object QqMusicQrcCrypto {
             val expanded = applyEBoxPermutation(state)
             val key64 = bytesToLongBE(byteArrayOf(0, 0) + key)
             val xor = expanded xor key64
-            return SP_TABLES[0][((xor ushr 42) and 0x3F).toInt()] or
-                SP_TABLES[1][((xor ushr 36) and 0x3F).toInt()] or
-                SP_TABLES[2][((xor ushr 30) and 0x3F).toInt()] or
-                SP_TABLES[3][((xor ushr 24) and 0x3F).toInt()] or
-                SP_TABLES[4][((xor ushr 18) and 0x3F).toInt()] or
-                SP_TABLES[5][((xor ushr 12) and 0x3F).toInt()] or
-                SP_TABLES[6][((xor ushr 6) and 0x3F).toInt()] or
-                SP_TABLES[7][(xor and 0x3F).toInt()]
+           
+            // QQ Music 使用自定义的 S-Box 索引计算（非标准 DES）
+            // 索引计算：((a & 0x20) | ((a & 0x1f) >> 1) | ((a & 0x01) << 4))
+            fun calculateSBoxIndex(value: Long): Int {
+                val a = value.toInt()
+                return ((a and 0x20) or ((a and 0x1f) shr 1) or ((a and 0x01) shl 4))
+            }
+            
+            return SP_TABLES[0][calculateSBoxIndex(xor ushr 42)] or
+                SP_TABLES[1][calculateSBoxIndex(xor ushr 36)] or
+                SP_TABLES[2][calculateSBoxIndex(xor ushr 30)] or
+                SP_TABLES[3][calculateSBoxIndex(xor ushr 24)] or
+                SP_TABLES[4][calculateSBoxIndex(xor ushr 18)] or
+                SP_TABLES[5][calculateSBoxIndex(xor ushr 12)] or
+                SP_TABLES[6][calculateSBoxIndex(xor ushr 6)] or
+                SP_TABLES[7][calculateSBoxIndex(xor and 0x3F)]
         }
 
         private fun initialPermutation(state: IntArray, input: ByteArray) {

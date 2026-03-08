@@ -35,6 +35,8 @@ object UnifiedLyricsParser {
             return null
         }
         
+        Timber.d("Lyrics content preview (first 300 chars): ${content.take(300)}")
+        
         return try {
             // 检测格式
             val format = LyricsFormat.detect(content)
@@ -42,19 +44,41 @@ object UnifiedLyricsParser {
             
             // 使用相应的解析器解析
             val lines = when (format) {
-                LyricsFormat.QRC -> QrcParser.parse(content)
-                LyricsFormat.KRC -> KrcParser.parse(content)
-                LyricsFormat.YRC -> YrcParser.parse(content)
-                LyricsFormat.ENHANCED_LRC -> EnhancedLrcParser.parse(content)
-                LyricsFormat.LRC -> LrcParser.parse(content)
+                LyricsFormat.QRC -> {
+                    val parsed = QrcParser.parse(content)
+                    Timber.d("QRC parsed ${parsed.size} lines")
+                    parsed
+                }
+                LyricsFormat.KRC -> {
+                    val parsed = KrcParser.parse(content)
+                    Timber.d("KRC parsed ${parsed.size} lines, first line words: ${parsed.firstOrNull()?.words?.size ?: 0}")
+                    parsed
+                }
+                LyricsFormat.YRC -> {
+                    val parsed = YrcParser.parse(content)
+                    Timber.d("YRC parsed ${parsed.size} lines")
+                    parsed
+                }
+                LyricsFormat.ENHANCED_LRC -> {
+                    val parsed = EnhancedLrcParser.parse(content)
+                    Timber.d("Enhanced LRC parsed ${parsed.size} lines")
+                    parsed
+                }
+                LyricsFormat.LRC -> {
+                    val parsed = LrcParser.parse(content)
+                    Timber.d("LRC parsed ${parsed.size} lines")
+                    parsed
+                }
                 LyricsFormat.TTML -> {
-                    // TTML 格式需要单独处理，这里返回 null 让其他地方处理
-                    Timber.d("TTML format should be parsed separately")
-                    return null
+                    // TTML 格式使用专用解析器
+                    Timber.d("Parsing TTML format")
+                    TTMLParser.parse(content)
                 }
                 LyricsFormat.PLAIN_TEXT -> {
                     // 纯文本格式转换为简单行
-                    parsePlainText(content)
+                    val parsed = parsePlainText(content)
+                    Timber.d("Plain text parsed ${parsed.size} lines")
+                    parsed
                 }
             }
             
@@ -139,7 +163,7 @@ object UnifiedLyricsParser {
             LyricsFormat.ENHANCED_LRC -> EnhancedLrcParser.parse(content)
             LyricsFormat.LRC -> LrcParser.parse(content)
             LyricsFormat.PLAIN_TEXT -> parsePlainText(content)
-            LyricsFormat.TTML -> emptyList() // TTML 需要单独处理
+            LyricsFormat.TTML -> TTMLParser.parse(content)
         }
     }
 }

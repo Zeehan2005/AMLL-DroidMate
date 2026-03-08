@@ -51,12 +51,16 @@ enum class LyricsFormat(val extension: String, val displayName: String) {
                 return QRC
             }
             
-            // KRC - 通常以[语言]或特殊标签开头
+            // KRC: 两种识别方式
+            // 1. 带 metadata: [language:], [id:], [hash:] 等
+            // 2. 不带 metadata 但有特征: [毫秒,毫秒]<毫秒,毫秒,0>（酷狗解密后的格式）
             if (trimmed.lines().any { 
                 it.startsWith("[language:") || 
                 it.startsWith("[id:") ||
                 it.startsWith("[hash:")
-            }) {
+            } || 
+            (Regex("""^\[\d{4,},\d+]""", RegexOption.MULTILINE).containsMatchIn(trimmed) &&
+                Regex("""<\d+,\d+,0>""").containsMatchIn(trimmed))) {
                 return KRC
             }
             

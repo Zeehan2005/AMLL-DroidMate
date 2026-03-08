@@ -4,6 +4,7 @@ import com.amll.droidmate.data.parser.mergeLyricLines
 import com.amll.droidmate.data.parser.LyricsFormat
 import com.amll.droidmate.data.network.NeteaseEapiCrypto
 import com.amll.droidmate.data.network.QqMusicQrcCrypto
+import com.amll.droidmate.data.network.KugouDecrypter
 import com.amll.droidmate.domain.model.*
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -11,6 +12,8 @@ import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.*
 import java.net.UnknownHostException
 import timber.log.Timber
@@ -91,29 +94,46 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 return null
             }
             
-            // 取第一个结果
-            val firstSong = songList[0].jsonObject
-            val songMid = firstSong["mid"]?.jsonPrimitive?.content ?: return null
-            val songIdNum = firstSong["id"]?.jsonPrimitive?.longOrNull
-            val songTitle = firstSong["title"]?.jsonPrimitive?.content
-                ?: firstSong["name"]?.jsonPrimitive?.content
-                ?: title
-            val singerName = firstSong["singer"]?.jsonArray
-                ?.firstOrNull()?.jsonObject?.get("name")?.jsonPrimitive?.content ?: artist
+            // 遍历所有候选，找到最佳匹配（对齐 Unilyric 逻辑）
+            var bestMatch: LyricsSearchResult? = null
+            var bestScore = -1
             
-            // 计算匹配度和匹配等级（对齐 Unilyric 打分模型）
-            val matchEval = evaluateMatch(title, artist, songTitle, singerName)
+            for (songElement in songList) {
+                val song = songElement.jsonObject
+                val songMid = song["mid"]?.jsonPrimitive?.content ?: continue
+                val songIdNum = song["id"]?.jsonPrimitive?.longOrNull
+                val songTitle = song["title"]?.jsonPrimitive?.content
+                    ?: song["name"]?.jsonPrimitive?.content
+                    ?: continue
+                val singerName = song["singer"]?.jsonArray
+                    ?.joinToString(", ") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "" }
+                    ?.takeIf { it.isNotBlank() } ?: continue
+                
+                // 计算匹配度
+                val matchEval = evaluateMatch(title, artist, songTitle, singerName)
+                val matchType = MatchType.valueOf(matchEval.matchType)
+                
+                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
+                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
+                    bestScore = matchType.score
+                    bestMatch = LyricsSearchResult(
+                        provider = "qq",
+                        songId = if (songIdNum != null) "$songMid::$songIdNum" else songMid,
+                        title = songTitle,
+                        artist = singerName,
+                        confidence = matchEval.confidence,
+                        matchType = matchEval.matchType
+                    )
+                }
+            }
             
-            Timber.i("Found QQ Music song: $songTitle - $singerName (mid: $songMid, confidence: ${matchEval.confidence}, match=${matchEval.matchType})")
+            if (bestMatch != null) {
+                Timber.i("Found QQ Music best match: ${bestMatch.title} - ${bestMatch.artist} (confidence: ${bestMatch.confidence}, match=${bestMatch.matchType})")
+            } else {
+                Timber.d("No qualifying QQ Music match found for: $keyword")
+            }
             
-            LyricsSearchResult(
-                provider = "qq",
-                songId = if (songIdNum != null) "$songMid::$songIdNum" else songMid,
-                title = songTitle,
-                artist = singerName,
-                confidence = matchEval.confidence,
-                matchType = matchEval.matchType
-            )
+            bestMatch
         } catch (e: Exception) {
             Timber.e(e, "Error searching QQ Music")
             null
@@ -140,13 +160,16 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 putJsonObject("comm") {
                     put("ct", 19)
                     put("cv", 1859)
+                    put("format", "json")
                 }
                 putJsonObject("req_1") {
                     put("module", "music.musichallSong.PlayLyricInfo")
                     put("method", "GetPlayLyricInfo")
                     putJsonObject("param") {
-                        put("songMID", fallbackMid)
-                        put("songID", 0)
+                        put("songMid", fallbackMid)  // 使用小写 mid (匹配 Unilyric)
+                        put("qrc", 1)                 // 显式请求 QRC 格式
+                        put("trans", 1)               // 请求翻译
+                        put("roma", 1)                // 请求罗马音
                     }
                 }
             }
@@ -171,11 +194,17 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonObject?.get("lyric")
                 ?.jsonPrimitive?.contentOrNull
             
-            // 获取QRC逐字格式歌词（优先使用）
-            val qrcContent = responseJson["req_1"]
-                ?.jsonObject?.get("data")
-                ?.jsonObject?.get("qrc")
-                ?.jsonPrimitive?.contentOrNull
+            // TODO: QRC 逐词歌词功能暂时禁用
+            // 原因：QQ Music QRC 使用自定义 3DES (非标准DES) + Zlib 加密方式
+            // 当前 3DES 实现存在 S-Box 索引计算问题，导致 Zlib 解压失败
+            // 已确认问题根源：QQ Music 使用自定义的 S-Box 索引: ((a&0x20)|((a&0x1f)>>1)|((a&0x01)<<4))
+            // 修复时需要参考 Unilyric 项目的完整实现
+            // 
+            // val qrcContent = responseJson["req_1"]
+            //     ?.jsonObject?.get("data")
+            //     ?.jsonObject?.get("qrc")
+            //     ?.jsonPrimitive?.contentOrNull
+            val qrcContent: String? = null
 
             val transContent = responseJson["req_1"]
                 ?.jsonObject?.get("data")
@@ -187,22 +216,44 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonObject?.get("roma")
                 ?.jsonPrimitive?.contentOrNull
             
-            if (lyricContent.isNullOrBlank() && qrcContent.isNullOrBlank()) {
+            // 诊断日志
+            Timber.d("QQ Music API response fields:")
+            Timber.d("  lyric present: ${!lyricContent.isNullOrBlank()}, length: ${lyricContent?.length ?: 0}")
+            // QRC 已禁用，不再检查
+            // Timber.d("  qrc present: ${!qrcContent.isNullOrBlank()}, length: ${qrcContent?.length ?: 0}")
+            Timber.d("  trans present: ${!transContent.isNullOrBlank()}, length: ${transContent?.length ?: 0}")
+            Timber.d("  roma present: ${!romaContent.isNullOrBlank()}, length: ${romaContent?.length ?: 0}")
+            
+            if (!lyricContent.isNullOrBlank()) {
+                Timber.d("LRC content preview (first 500 chars): ${lyricContent.take(500)}")
+            }
+            
+            if (lyricContent.isNullOrBlank()) {
                 Timber.w("No lyrics content from QQ Music for: $fallbackMid")
                 return null
             }
             
-            // 优先使用QRC逐字格式，如果不存在则使用LRC格式
-            val contentToUse = if (!qrcContent.isNullOrBlank()) {
-                Timber.i("Using QRC (word-by-word) format for QQ Music")
-                qrcContent
-            } else {
-                Timber.i("Using LRC (line-by-line) format for QQ Music")
-                lyricContent!!
+            // 跳过 QRC，直接使用 LRC（逐句歌词）
+            // TODO: 待 3DES 实现修复后可恢复 QRC 优先权
+            Timber.i("Using LRC (line-by-line) format for QQ Music (QRC disabled)")
+            val contentToUse = lyricContent!!
+            
+            // 检查LRC内容是否有效（防止"0"或其他无效标记）
+            if (contentToUse.length < 5 || contentToUse == "0") {
+                Timber.w("LRC content from QQ Music is invalid (likely empty): length=${contentToUse.length}")
+                return null
             }
             
-            // QQ音乐歌词是base64编码的LRC/QRC格式，使用新的统一解析器
-            val decodedLyric = String(android.util.Base64.decode(contentToUse, android.util.Base64.DEFAULT))
+            // QQ音乐歌词需要解密：QRC = Hex+3DES+Zlib, LRC = Base64
+            // 使用 decodeQqLyricPayload 自动检测格式并解密
+            val decodedLyric = try {
+                decodeQqLyricPayload(contentToUse)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to decode QQ Music lyrics. Content length: ${contentToUse.length}")
+                Timber.d("First 200 chars of content: ${contentToUse.take(200)}")
+                // 解密失败时尝试直接使用原始内容
+                contentToUse
+            }
             
             // 调试日志：显示解码后的前500个字符
             Timber.d("Decoded QQ Music lyrics (first 500 chars): ${decodedLyric.take(500)}")
@@ -215,19 +266,19 @@ class LyricsRepository(private val httpClient: HttpClient) {
             ) ?: return null
 
             val translationLines = transContent
-                ?.takeIf { it.isNotBlank() }
+                ?.takeIf { it.isNotBlank() && it != "0" && it.length >= 5 }
                 ?.let {
                     runCatching {
-                        val decoded = String(android.util.Base64.decode(it, android.util.Base64.DEFAULT))
+                        val decoded = decodeQqLyricPayload(it)
                         com.amll.droidmate.data.parser.LrcParser.parse(decoded)
                     }.getOrNull()
                 }
 
             val romanizationLines = romaContent
-                ?.takeIf { it.isNotBlank() }
+                ?.takeIf { it.isNotBlank() && it != "0" && it.length >= 5 }
                 ?.let {
                     runCatching {
-                        val decoded = String(android.util.Base64.decode(it, android.util.Base64.DEFAULT))
+                        val decoded = decodeQqLyricPayload(it)
                         com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded)?.lines
                     }.getOrNull()
                 }
@@ -307,10 +358,24 @@ class LyricsRepository(private val httpClient: HttpClient) {
 
     private fun decodeQqLyricPayload(payload: String): String {
         val raw = payload.trim()
-        return if (QqMusicQrcCrypto.looksLikeHex(raw)) {
-            QqMusicQrcCrypto.decryptQrcHex(raw)
+        
+        // 对齐 Unilyric 逻辑：先检查是否为 Hex（需要 3DES 解密）
+        // 如果是纯 Hex 字符串，大概率是加密的 QRC
+        if (QqMusicQrcCrypto.looksLikeHex(raw)) {
+            return try {
+                QqMusicQrcCrypto.decryptQrcHex(raw)
+            } catch (e: Exception) {
+                android.util.Log.e("LyricsRepository", "Hex+3DES decryption failed, trying Base64 fallback", e)
+                // 解密失败，尝试 Base64（可能判断错了）
+                try {
+                    String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                } catch (e2: Exception) {
+                    throw IllegalStateException("Both Hex+3DES and Base64 decoding failed", e)
+                }
+            }
         } else {
-            String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT))
+            // 不是 Hex，直接 Base64 解码（标准 LRC）
+            return String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT), Charsets.UTF_8)
         }
     }
 
@@ -361,26 +426,52 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 return null
             }
             
-            // 取第一个结果
-            val firstSong = songList[0].jsonObject
-            val songId = firstSong["id"]?.jsonPrimitive?.long?.toString() ?: return null
-            val songTitle = firstSong["name"]?.jsonPrimitive?.content ?: title
-            val singerName = firstSong["artists"]?.jsonArray
-                ?.firstOrNull()?.jsonObject?.get("name")?.jsonPrimitive?.content ?: artist
+            // 遍历所有候选，找到最佳匹配（对齐 Unilyric 逻辑）
+            var bestMatch: LyricsSearchResult? = null
+            var bestScore = -1
             
-            // 计算匹配度和匹配等级（对齐 Unilyric 打分模型）
-            val matchEval = evaluateMatch(title, artist, songTitle, singerName)
+            for (songElement in songList) {
+                val song = songElement.jsonObject
+                val songId = song["id"]?.jsonPrimitive?.long?.toString() ?: continue
+                val songTitle = song["name"]?.jsonPrimitive?.content ?: continue
+                val singerName = song["artists"]?.jsonArray
+                    ?.joinToString(", ") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "" }
+                    ?.takeIf { it.isNotBlank() } ?: continue
+                val albumName = song["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+                val durationMs = song["duration"]?.jsonPrimitive?.longOrNull
+                
+                // 计算匹配度
+                val matchEval = evaluateMatch(
+                    searchTitle = title,
+                    searchArtist = artist,
+                    resultTitle = songTitle,
+                    resultArtist = singerName,
+                    resultAlbum = albumName,
+                    resultDurationMs = durationMs
+                )
+                val matchType = MatchType.valueOf(matchEval.matchType)
+                
+                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
+                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
+                    bestScore = matchType.score
+                    bestMatch = LyricsSearchResult(
+                        provider = "netease",
+                        songId = songId,
+                        title = songTitle,
+                        artist = singerName,
+                        confidence = matchEval.confidence,
+                        matchType = matchEval.matchType
+                    )
+                }
+            }
             
-            Timber.i("Found Netease song: $songTitle - $singerName (id: $songId, confidence: ${matchEval.confidence}, match=${matchEval.matchType})")
+            if (bestMatch != null) {
+                Timber.i("Found Netease best match: ${bestMatch.title} - ${bestMatch.artist} (id: ${bestMatch.songId}, confidence: ${bestMatch.confidence}, match=${bestMatch.matchType})")
+            } else {
+                Timber.d("No qualifying Netease match found for: $keyword")
+            }
             
-            LyricsSearchResult(
-                provider = "netease",
-                songId = songId,
-                title = songTitle,
-                artist = singerName,
-                confidence = matchEval.confidence,
-                matchType = matchEval.matchType
-            )
+            bestMatch
         } catch (e: Exception) {
             Timber.e(e, "Error searching Netease")
             null
@@ -517,53 +608,99 @@ class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchKugou(title: String, artist: String): LyricsSearchResult? {
         return try {
             val keyword = "$title $artist".trim()
+            Timber.d("Kugou search starting for keyword: $keyword")
             
-            // 酷狗搜索API
-            val response = httpClient.get("http://mobilecdn.kugou.com/api/v3/search/song") {
+            // Step 1: 从 Kugou 搜歌曲获得哈希值（对齐 Unilyric）
+            val searchResponse = httpClient.get("http://mobilecdn.kugou.com/api/v3/search/song") {
                 parameter("keyword", keyword)
                 parameter("page", "1")
-                parameter("pagesize", "5")
+                parameter("pagesize", "20")
                 parameter("showtype", "1")
             }
             
-            if (!response.status.isSuccess()) {
-                Timber.w("Kugou search failed: ${response.status}")
+            if (!searchResponse.status.isSuccess()) {
+                Timber.w("Kugou song search failed: ${searchResponse.status}")
                 return null
             }
             
             val json = Json { ignoreUnknownKeys = true }
-            val responseBody = response.body<String>()
-            val responseJson = json.parseToJsonElement(responseBody).jsonObject
+            val searchBody = searchResponse.body<String>()
+            Timber.d("Kugou search API raw response (first 2000 chars): ${searchBody.take(2000)}")
             
-            // 解析搜索结果
-            val songList = responseJson["data"]
-                ?.jsonObject?.get("info")
-                ?.jsonArray
+            val searchJson = json.parseToJsonElement(searchBody).jsonObject
+            val dataElement = searchJson["data"]?.jsonObject?.get("info")?.jsonArray
             
-            if (songList.isNullOrEmpty()) {
-                Timber.d("No Kugou results found for: $keyword")
+            Timber.d("Kugou parsed data element: ${dataElement?.size} items")
+            
+            if (dataElement.isNullOrEmpty()) {
+                Timber.w("No Kugou song results found for: $keyword")
                 return null
             }
             
-            // 取第一个结果
-            val firstSong = songList[0].jsonObject
-            val hash = firstSong["hash"]?.jsonPrimitive?.content ?: return null
-            val songTitle = firstSong["songname"]?.jsonPrimitive?.content ?: title
-            val singerName = firstSong["singername"]?.jsonPrimitive?.content ?: artist
+            // Step 2: 遍历候选歌曲，计算匹配度（不依赖歌词搜索是否成功）
+            // 歌词搜索在 getKugouLyrics 时会重新进行，这里只负责找到最匹配的歌曲
+            var bestMatch: LyricsSearchResult? = null
+            var bestScore = -1
             
-            // 计算匹配度和匹配等级（对齐 Unilyric 打分模型）
-            val matchEval = evaluateMatch(title, artist, songTitle, singerName)
+            Timber.d("Kugou found ${dataElement.size} song candidates, evaluating match...")
             
-            Timber.i("Found Kugou song: $songTitle - $singerName (hash: $hash, confidence: ${matchEval.confidence}, match=${matchEval.matchType})")
+            for ((index, songElement) in dataElement.withIndex()) {
+                val songObj = songElement.jsonObject
+                val songHash = songObj["hash"]?.jsonPrimitive?.content
+                val songTitle = songObj["songname"]?.jsonPrimitive?.content
+                val singerName = songObj["singername"]?.jsonPrimitive?.content
+                val albumName = songObj["album_name"]?.jsonPrimitive?.content
+                val durationSec = songObj["duration"]?.jsonPrimitive?.longOrNull
+                
+                // 检查必要字段
+                if (songHash == null || songTitle == null || singerName == null || durationSec == null) {
+                    Timber.d("Candidate #$index: Missing required fields (hash=$songHash, title=$songTitle, artist=$singerName, dur=$durationSec)")
+                    continue
+                }
+                
+                val durationMs = durationSec * 1000
+                
+                Timber.d("Candidate #$index: $songTitle - $singerName (hash=$songHash, duration=${durationMs}ms)")
+                
+                // Step 3: 计算匹配度
+                val matchEval = evaluateMatch(
+                    searchTitle = title,
+                    searchArtist = artist,
+                    resultTitle = songTitle,
+                    resultArtist = singerName,
+                    resultAlbum = albumName,
+                    resultDurationMs = durationMs
+                )
+                val matchType = MatchType.valueOf(matchEval.matchType)
+                
+                Timber.d("  -> Evaluation: confidence=${matchEval.confidence}, match=${matchEval.matchType}(score=${matchType.score})")
+                
+                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
+                if (matchType.score < MatchType.VERY_LOW.score) {
+                    Timber.d("  -> Score ${matchType.score} below threshold ${MatchType.VERY_LOW.score}, skipping")
+                } else if (matchType.score > bestScore) {
+                    bestScore = matchType.score
+                    bestMatch = LyricsSearchResult(
+                        provider = "kugou",
+                        songId = songHash,
+                        title = songTitle,
+                        artist = singerName,
+                        confidence = matchEval.confidence,
+                        matchType = matchEval.matchType
+                    )
+                    Timber.d("  -> New best match found!")
+                } else {
+                    Timber.d("  -> Score ${matchType.score} not better than best ${bestScore}, skipping")
+                }
+            }
             
-            LyricsSearchResult(
-                provider = "kugou",
-                songId = hash,
-                title = songTitle,
-                artist = singerName,
-                confidence = matchEval.confidence,
-                matchType = matchEval.matchType
-            )
+            if (bestMatch != null) {
+                Timber.i("Found Kugou best match: ${bestMatch.title} - ${bestMatch.artist} (hash: ${bestMatch.songId}, confidence: ${bestMatch.confidence})")
+            } else {
+                Timber.w("No qualifying Kugou match found for: $keyword (tried ${dataElement.size} candidates)")
+            }
+            
+            bestMatch
         } catch (e: Exception) {
             Timber.e(e, "Error searching Kugou")
             null
@@ -575,43 +712,93 @@ class LyricsRepository(private val httpClient: HttpClient) {
      */
     suspend fun getKugouLyrics(hash: String, title: String? = null, artist: String? = null): TTMLLyrics? {
         return try {
-            val response = httpClient.get("http://www.kugou.com/yy/index.php") {
-                parameter("r", "play/getdata")
+            // 基于 Unilyric 的实现
+            // https://lyrics.kugou.com 是官方歌词 API
+            
+            // Step 1: 搜索歌词候选（使用 hash）
+            val searchResponse = httpClient.get("https://lyrics.kugou.com/search") {
+                parameter("ver", "1")
+                parameter("man", "yes")
+                parameter("client", "pc")
+                parameter("keyword", "")
                 parameter("hash", hash)
             }
             
-            if (!response.status.isSuccess()) {
-                Timber.w("Kugou lyrics fetch failed: ${response.status}")
+            if (!searchResponse.status.isSuccess()) {
+                Timber.w("Kugou lyrics search failed: ${searchResponse.status}")
                 return null
             }
             
             val json = Json { ignoreUnknownKeys = true }
-            val responseBody = response.body<String>()
-            val responseJson = json.parseToJsonElement(responseBody).jsonObject
+            val searchBody = searchResponse.body<String>()
+            Timber.d("Kugou lyrics search response (first 1000 chars): ${searchBody.take(1000)}")
             
-            val lyricContent = responseJson["data"]
-                ?.jsonObject?.get("lyrics")
-                ?.jsonPrimitive?.contentOrNull
+            val searchJson = json.parseToJsonElement(searchBody).jsonObject
+            val status = searchJson["status"]?.jsonPrimitive?.intOrNull ?: -1
+            val candidates = searchJson["candidates"]?.jsonArray
             
-            if (lyricContent.isNullOrBlank()) {
-                Timber.w("No lyrics content from Kugou for: $hash")
+            if (status != 200 || candidates.isNullOrEmpty()) {
+                Timber.w("Kugou lyrics search failed with status=$status or no candidates")
                 return null
             }
             
-            // 酷狗歌词需要base64解码后是KRC/LRC格式，使用新的统一解析器
-            val decodedLyric = try {
-                String(android.util.Base64.decode(lyricContent, android.util.Base64.DEFAULT))
-            } catch (e: Exception) {
-                lyricContent // 如果解码失败,直接使用原文
+            // Step 2: 获取第一个候选（最相关的）的 id 和 accesskey
+            val candidate = candidates[0].jsonObject
+            val lyricId = candidate["id"]?.jsonPrimitive?.content ?: run {
+                Timber.w("No lyrics ID in candidate")
+                return null
+            }
+            val accesskey = candidate["accesskey"]?.jsonPrimitive?.content ?: run {
+                Timber.w("No accesskey in candidate")
+                return null
             }
             
-            // 使用统一解析器处理多种格式（KRC、LRC等）
+            Timber.d("Kugou lyrics candidate - id: $lyricId, accesskey: $accesskey")
+            
+            // Step 3: 下载歌词（KRC 格式）
+            val downloadResponse = httpClient.get("https://lyrics.kugou.com/download") {
+                parameter("ver", "1")
+                parameter("client", "pc")
+                parameter("id", lyricId)
+                parameter("accesskey", accesskey)
+                parameter("fmt", "krc")
+                parameter("charset", "utf8")
+            }
+            
+            if (!downloadResponse.status.isSuccess()) {
+                Timber.w("Kugou lyrics download failed: ${downloadResponse.status}")
+                return null
+            }
+            
+            val downloadBody = downloadResponse.body<String>()
+            Timber.d("Kugou lyrics download response (first 500 chars): ${downloadBody.take(500)}")
+            
+            val downloadJson = json.parseToJsonElement(downloadBody).jsonObject
+            val encryptedContent = downloadJson["content"]?.jsonPrimitive?.content
+            
+            if (encryptedContent.isNullOrBlank()) {
+                Timber.w("No lyrics content in download response")
+                return null
+            }
+            
+            // Step 4: 解密歌词内容（根据 Unilyric: Base64 + XOR + Zlib）
+            val decryptedLyrics = KugouDecrypter.decryptKrc(encryptedContent)
+            
+            if (decryptedLyrics.isNullOrBlank()) {
+                Timber.w("Failed to decrypt Kugou lyrics")
+                return null
+            }
+            
+            Timber.d("Decrypted Kugou lyrics (first 500 chars): ${decryptedLyrics.take(500)}")
+            
+            // Step 5: 使用统一解析器处理 KRC/LRC 格式
             val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
-                content = decodedLyric,
+                content = decryptedLyrics,
                 title = title ?: "Unknown",
                 artist = artist ?: "Unknown"
             )
-            Timber.i("Successfully fetched Kugou lyrics for: $hash")
+            
+            Timber.i("Successfully fetched and decrypted Kugou lyrics for: $hash")
             return ttml
             
         } catch (e: Exception) {
@@ -1065,44 +1252,68 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 智能综合搜索歌词 - 尝试多个来源并选择最佳结果
      * 基于 Unilyric 的多源搜索策略
+     * 使用并行搜索加速（对齐 Unilyric）
      */
     suspend fun searchLyrics(
         title: String,
         artist: String
-    ): List<LyricsSearchResult> {
+    ): List<LyricsSearchResult> = coroutineScope {
+        Timber.i("Starting multi-source parallel lyrics search for: $title - $artist")
+        
+        // 并行搜索所有平台（对齐 Unilyric 的优化）
+        val qqMusicDeferred = async { 
+            Timber.d("QQ Music search starting...")
+            runCatching { searchQQMusic(title, artist) }.getOrNull().also { result ->
+                Timber.d("QQ Music search completed: ${if (result != null) "found" else "null"}")
+            }
+        }
+        val kugouDeferred = async { 
+            Timber.d("Kugou search starting...")
+            runCatching { searchKugou(title, artist) }.getOrNull().also { result ->
+                Timber.d("Kugou search completed: ${if (result != null) "found (${result.title} - ${result.artist})" else "null"}")
+            }
+        }
+        val neteaseDeferred = async { 
+            Timber.d("Netease search starting...")
+            runCatching { searchNetease(title, artist) }.getOrNull().also { result ->
+                Timber.d("Netease search completed: ${if (result != null) "found" else "null"}")
+            }
+        }
+        
+        // 等待所有搜索完成
         val results = mutableListOf<LyricsSearchResult>()
         
-        Timber.i("Starting multi-source lyrics search for: $title - $artist")
-        
-        // 搜索各个平台。
-        // 注：当前实现每个平台取一个最佳候选，再统一排序。
-
-        // 1. QQ 音乐
-        searchQQMusic(title, artist)?.let { 
+        val qqResult = qqMusicDeferred.await()
+        Timber.d("QQ Music await result: $qqResult")
+        qqResult?.let { 
             results.add(it)
             Timber.d("Added QQ Music result with confidence: ${it.confidence}")
         }
         
-        // 2. 酷狗音乐
-        searchKugou(title, artist)?.let { 
+        val kugouResult = kugouDeferred.await()
+        Timber.d("Kugou await result: $kugouResult")
+        kugouResult?.let { 
             results.add(it)
             Timber.d("Added Kugou result with confidence: ${it.confidence}")
         }
-
-        // 3. 网易云音乐
-        searchNetease(title, artist)?.let {
+        
+        val neteaseResult = neteaseDeferred.await()
+        Timber.d("Netease await result: $neteaseResult")
+        neteaseResult?.let {
             results.add(it)
             Timber.d("Added Netease result with confidence: ${it.confidence}")
         }
 
-        // 统一按匹配度降序排序，去重(provider + songId)。
+        // 统一按匹配度降序排序，去重(provider + songId)
         val sortedResults = results
             .sortedByDescending { it.confidence }
             .distinctBy { "${it.provider.lowercase()}:${it.songId}" }
 
-        Timber.i("Found ${sortedResults.size} results, best confidence: ${sortedResults.firstOrNull()?.confidence}")
+        Timber.i("Search completed: Found ${results.size} total results, ${sortedResults.size} after dedup")
+        Timber.i("Results before sort: ${results.map { "${it.provider.uppercase()}(${it.confidence})" }}")
+        Timber.i("Results after sort: ${sortedResults.map { "${it.provider.uppercase()}(${it.confidence})" }}")
         
-        return sortedResults
+        sortedResults
     }
     
     /**
