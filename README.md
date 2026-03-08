@@ -1,3 +1,8 @@
+> [!WARNING]  
+> **v1.0 服务提示** 
+> 
+> 受限于技术原因，自选歌词可能有异常。建议您使用 AMLL TMLL DB 或使用 [Unilyric](https://github.com/apoint123/Unilyric) 提前转换后导入。为您带来的不便深表歉意。
+
 # AMLL DroidMate - Android Lyrics Application
 
 傻瓜式 Android 端 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 外置歌词显示器
