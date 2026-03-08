@@ -160,16 +160,13 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 putJsonObject("comm") {
                     put("ct", 19)
                     put("cv", 1859)
-                    put("format", "json")
                 }
                 putJsonObject("req_1") {
                     put("module", "music.musichallSong.PlayLyricInfo")
                     put("method", "GetPlayLyricInfo")
                     putJsonObject("param") {
-                        put("songMid", fallbackMid)  // 使用小写 mid (匹配 Unilyric)
-                        put("qrc", 1)                 // 显式请求 QRC 格式
-                        put("trans", 1)               // 请求翻译
-                        put("roma", 1)                // 请求罗马音
+                        put("songMID", fallbackMid)
+                        put("songID", 0)
                     }
                 }
             }
@@ -194,17 +191,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonObject?.get("lyric")
                 ?.jsonPrimitive?.contentOrNull
             
-            // TODO: QRC 逐词歌词功能暂时禁用
-            // 原因：QQ Music QRC 使用自定义 3DES (非标准DES) + Zlib 加密方式
-            // 当前 3DES 实现存在 S-Box 索引计算问题，导致 Zlib 解压失败
-            // 已确认问题根源：QQ Music 使用自定义的 S-Box 索引: ((a&0x20)|((a&0x1f)>>1)|((a&0x01)<<4))
-            // 修复时需要参考 Unilyric 项目的完整实现
-            // 
-            // val qrcContent = responseJson["req_1"]
-            //     ?.jsonObject?.get("data")
-            //     ?.jsonObject?.get("qrc")
-            //     ?.jsonPrimitive?.contentOrNull
-            val qrcContent: String? = null
+            // 获取QRC逐字格式歌词（优先使用）
+            val qrcContent = responseJson["req_1"]
+                ?.jsonObject?.get("data")
+                ?.jsonObject?.get("qrc")
+                ?.jsonPrimitive?.contentOrNull
 
             val transContent = responseJson["req_1"]
                 ?.jsonObject?.get("data")
@@ -216,42 +207,52 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonObject?.get("roma")
                 ?.jsonPrimitive?.contentOrNull
             
-            // 诊断日志
-            Timber.d("QQ Music API response fields:")
-            Timber.d("  lyric present: ${!lyricContent.isNullOrBlank()}, length: ${lyricContent?.length ?: 0}")
-            // QRC 已禁用，不再检查
-            // Timber.d("  qrc present: ${!qrcContent.isNullOrBlank()}, length: ${qrcContent?.length ?: 0}")
-            Timber.d("  trans present: ${!transContent.isNullOrBlank()}, length: ${transContent?.length ?: 0}")
-            Timber.d("  roma present: ${!romaContent.isNullOrBlank()}, length: ${romaContent?.length ?: 0}")
-            
-            if (!lyricContent.isNullOrBlank()) {
-                Timber.d("LRC content preview (first 500 chars): ${lyricContent.take(500)}")
-            }
-            
-            if (lyricContent.isNullOrBlank()) {
+            if (lyricContent.isNullOrBlank() && qrcContent.isNullOrBlank()) {
                 Timber.w("No lyrics content from QQ Music for: $fallbackMid")
                 return null
             }
             
-            // 跳过 QRC，直接使用 LRC（逐句歌词）
-            // TODO: 待 3DES 实现修复后可恢复 QRC 优先权
-            Timber.i("Using LRC (line-by-line) format for QQ Music (QRC disabled)")
-            val contentToUse = lyricContent!!
+            // 优先使用QRC逐字格式，如果不存在则使用LRC格式
+            val contentToUse = if (!qrcContent.isNullOrBlank()) {
+                Timber.i("Using QRC (word-by-word) format for QQ Music")
+                qrcContent
+            } else {
+                Timber.i("Using LRC (line-by-line) format for QQ Music")
+                lyricContent!!
+            }
             
-            // 检查LRC内容是否有效（防止"0"或其他无效标记）
+            // 检查内容是否有效（防止"0"或其他无效标记）
             if (contentToUse.length < 5 || contentToUse == "0") {
-                Timber.w("LRC content from QQ Music is invalid (likely empty): length=${contentToUse.length}")
+                Timber.w("Content from QQ Music is invalid (likely empty): '$contentToUse'")
+                // 检查是否有备选LRC内容
+                if (contentToUse != lyricContent && !lyricContent.isNullOrBlank() && lyricContent.length >= 5 && lyricContent != "0") {
+                    Timber.i("Fallback to LRC format from QQ Music")
+                    // 重新使用LRC
+                    val fallbackDecoded = try {
+                        String(android.util.Base64.decode(lyricContent, android.util.Base64.DEFAULT))
+                    } catch (e: IllegalArgumentException) {
+                        lyricContent
+                    }
+                    if (fallbackDecoded.length > 5 && fallbackDecoded != "0") {
+                        val fallbackLyrics = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
+                            content = fallbackDecoded,
+                            title = title ?: "Unknown",
+                            artist = artist ?: "Unknown"
+                        )
+                        return fallbackLyrics
+                    }
+                }
                 return null
             }
             
-            // QQ音乐歌词需要解密：QRC = Hex+3DES+Zlib, LRC = Base64
-            // 使用 decodeQqLyricPayload 自动检测格式并解密
+            // QQ音乐歌词是base64编码的LRC/QRC格式，使用新的统一解析器
+            // 添加错误处理，以防Base64数据无效
             val decodedLyric = try {
-                decodeQqLyricPayload(contentToUse)
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to decode QQ Music lyrics. Content length: ${contentToUse.length}")
+                String(android.util.Base64.decode(contentToUse, android.util.Base64.DEFAULT))
+            } catch (e: IllegalArgumentException) {
+                Timber.e(e, "Failed to decode Base64 content from QQ Music. Content length: ${contentToUse.length}")
                 Timber.d("First 200 chars of content: ${contentToUse.take(200)}")
-                // 解密失败时尝试直接使用原始内容
+                // 尝试直接使用原始内容（可能不是Base64编码）
                 contentToUse
             }
             
@@ -269,7 +270,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.takeIf { it.isNotBlank() && it != "0" && it.length >= 5 }
                 ?.let {
                     runCatching {
-                        val decoded = decodeQqLyricPayload(it)
+                        val decoded = try {
+                            String(android.util.Base64.decode(it, android.util.Base64.DEFAULT))
+                        } catch (e: IllegalArgumentException) {
+                            it
+                        }
                         com.amll.droidmate.data.parser.LrcParser.parse(decoded)
                     }.getOrNull()
                 }
@@ -278,7 +283,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 ?.takeIf { it.isNotBlank() && it != "0" && it.length >= 5 }
                 ?.let {
                     runCatching {
-                        val decoded = decodeQqLyricPayload(it)
+                        val decoded = try {
+                            String(android.util.Base64.decode(it, android.util.Base64.DEFAULT))
+                        } catch (e: IllegalArgumentException) {
+                            it
+                        }
                         com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded)?.lines
                     }.getOrNull()
                 }
@@ -358,24 +367,10 @@ class LyricsRepository(private val httpClient: HttpClient) {
 
     private fun decodeQqLyricPayload(payload: String): String {
         val raw = payload.trim()
-        
-        // 对齐 Unilyric 逻辑：先检查是否为 Hex（需要 3DES 解密）
-        // 如果是纯 Hex 字符串，大概率是加密的 QRC
-        if (QqMusicQrcCrypto.looksLikeHex(raw)) {
-            return try {
-                QqMusicQrcCrypto.decryptQrcHex(raw)
-            } catch (e: Exception) {
-                android.util.Log.e("LyricsRepository", "Hex+3DES decryption failed, trying Base64 fallback", e)
-                // 解密失败，尝试 Base64（可能判断错了）
-                try {
-                    String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT), Charsets.UTF_8)
-                } catch (e2: Exception) {
-                    throw IllegalStateException("Both Hex+3DES and Base64 decoding failed", e)
-                }
-            }
+        return if (QqMusicQrcCrypto.looksLikeHex(raw)) {
+            QqMusicQrcCrypto.decryptQrcHex(raw)
         } else {
-            // 不是 Hex，直接 Base64 解码（标准 LRC）
-            return String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT))
         }
     }
 
