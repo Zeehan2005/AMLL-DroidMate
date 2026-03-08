@@ -64,6 +64,7 @@ fun AMLLLyricsView(
     val onLineSeekState = rememberUpdatedState(onLineSeek)
     var isPageReady by remember { mutableStateOf(false) }
     var lastModeValue by remember { mutableStateOf<String?>(null) }
+    var lastBackgroundProfileValue by remember { mutableStateOf<String?>(null) }
     var lastLyrics by remember { mutableStateOf<TTMLLyrics?>(null) }
     var lastLyricsPayload by remember { mutableStateOf<String?>(null) }
     var lastAlbumArtUri by remember { mutableStateOf<String?>(null) }
@@ -84,6 +85,7 @@ fun AMLLLyricsView(
                     override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                         isPageReady = false
                         lastModeValue = null
+                        lastBackgroundProfileValue = null
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
@@ -94,6 +96,7 @@ fun AMLLLyricsView(
                         isPageReady = true
                         // Force one re-sync after page finishes to avoid losing early bridge calls.
                         lastModeValue = null
+                        lastBackgroundProfileValue = null
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
@@ -119,6 +122,10 @@ fun AMLLLyricsView(
                     domStorageEnabled = true
                     allowFileAccess = true
                     allowContentAccess = true
+                    // Allow asset page (file origin) to read local cached album art file URIs.
+                    // Required for `file:///data/user/0/...` album art paths passed from Kotlin.
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
                     // 性能优化配置
                     cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
                     setRenderPriority(android.webkit.WebSettings.RenderPriority.HIGH)
@@ -167,6 +174,20 @@ fun AMLLLyricsView(
                 amllDebug("[$debugSource#$instanceId] Bridge call: setRenderMode($modeValue)")
                 view.evaluateJavascript("window.setRenderMode && window.setRenderMode('$modeValue');", null)
                 lastModeValue = modeValue
+            }
+
+            val backgroundProfile = if (renderMode == AMLLRenderMode.DOM) {
+                """{"renderer":"pixi","fps":60,"flowSpeed":2.35,"renderScale":0.9,"staticMode":false,"lowFreqVolume":1.0}"""
+            } else {
+                """{"renderer":"pixi","fps":30,"flowSpeed":1.4,"renderScale":0.65,"staticMode":false,"lowFreqVolume":1.0}"""
+            }
+            if (lastBackgroundProfileValue != backgroundProfile) {
+                amllDebug("[$debugSource#$instanceId] Bridge call: configureBackgroundEffect(profile=$backgroundProfile)")
+                view.evaluateJavascript(
+                    "window.configureBackgroundEffect && window.configureBackgroundEffect($backgroundProfile);",
+                    null
+                )
+                lastBackgroundProfileValue = backgroundProfile
             }
 
             // 只在lyrics对象引用改变时才重新构建JSON（避免每秒都构建）
