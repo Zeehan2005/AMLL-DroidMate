@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ContextWrapper
 import android.util.Log
 import android.provider.Settings
 import android.widget.Toast
@@ -72,6 +73,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,15 +87,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.amll.droidmate.R
@@ -145,6 +150,12 @@ fun MainScreen() {
     var webViewReloadKey by remember { mutableStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     var showOpenAppDialog by remember { mutableStateOf(false) }
+    val useDarkSystemIcons = !isLyricsFullscreen &&
+        MaterialTheme.colorScheme.background.luminance() > 0.5f
+
+    // Follow content brightness: dark content -> white icons, light content -> dark icons.
+    AdaptiveStatusBarStyle(useDarkIcons = useDarkSystemIcons)
+
     val customLyricsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -464,11 +475,32 @@ fun MainScreen() {
                         .statusBarsPadding()
                         .padding(8.dp)
                 ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "退出全屏")
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "退出全屏",
+                        tint = if (useDarkSystemIcons) Color.Black else Color.White
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun AdaptiveStatusBarStyle(useDarkIcons: Boolean) {
+    val view = LocalView.current
+
+    SideEffect {
+        val activity = view.context.findActivity() ?: return@SideEffect
+        val insetsController = WindowCompat.getInsetsController(activity.window, view)
+        insetsController.isAppearanceLightStatusBars = useDarkIcons
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
