@@ -54,6 +54,14 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("AMLL DroidMate Alpha $buildTimestamp Hello World.apk")
+        }
+    }
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.02.02"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.02.02"))
