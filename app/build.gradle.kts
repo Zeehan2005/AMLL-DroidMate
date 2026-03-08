@@ -1,3 +1,4 @@
+import com.android.build.api.variant.ApkVariantOutput
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -57,7 +58,9 @@ android {
 androidComponents {
     onVariants(selector().all()) { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("AMLL DroidMate Alpha $buildTimestamp Hello World.apk")
+            (output as? ApkVariantOutput)?.outputFileName?.set(
+                "AMLL DroidMate Alpha $buildTimestamp Hello World.apk"
+            )
         }
     }
 }
