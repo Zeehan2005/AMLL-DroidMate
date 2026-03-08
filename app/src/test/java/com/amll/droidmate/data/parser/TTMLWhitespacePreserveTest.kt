@@ -2,6 +2,7 @@ package com.amll.droidmate.data.parser
 
 import com.amll.droidmate.data.repository.LyricsRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
@@ -26,5 +27,17 @@ class TTMLWhitespacePreserveTest {
         assertNotNull(parsed)
         assertEquals(1, parsed?.lines?.size)
         assertEquals(" HelloWorld ", parsed?.lines?.get(0)?.text)
+    }
+
+    @Test
+    fun parser_keeps_visible_spaces_in_background_line() {
+        val ttml = """<?xml version="1.0" encoding="UTF-8"?><tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><div><p begin="00:00.000" end="00:02.000"><span ttm:role="x-bg"><span begin="00:00.000" end="00:01.000"> It's</span><span begin="00:01.000" end="00:02.000"> ridiculous </span></span></p></div></body></tt>"""
+
+        val lines = TTMLParser.parse(ttml)
+
+        val bgLine = lines.firstOrNull { it.isBG }
+        assertNotNull(bgLine)
+        assertEquals(" It's ridiculous ", bgLine?.text)
+        assertTrue((bgLine?.words?.size ?: 0) >= 2)
     }
 }

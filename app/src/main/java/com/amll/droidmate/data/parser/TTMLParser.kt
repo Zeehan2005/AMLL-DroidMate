@@ -380,11 +380,12 @@ object TTMLParser {
     }
 
     private fun cleanBackgroundText(text: String): String {
-        val trimmed = text.trim()
-        if (trimmed.length >= 2 && trimmed.startsWith("(") && trimmed.endsWith(")")) {
-            return trimmed.substring(1, trimmed.length - 1).trim()
+        // 背景歌词同样遵循可见空格语义：禁止 trim。
+        // 仅在文本本身严格被括号包裹时去掉一层括号，不改动其它空格。
+        if (text.length >= 2 && text.startsWith("(") && text.endsWith(")")) {
+            return text.substring(1, text.length - 1)
         }
-        return trimmed
+        return text
     }
     
     /**
