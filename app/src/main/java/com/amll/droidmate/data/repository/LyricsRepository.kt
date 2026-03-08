@@ -2,6 +2,7 @@
 
 import com.amll.droidmate.data.parser.mergeLyricLines
 import com.amll.droidmate.data.parser.LyricsFormat
+import com.amll.droidmate.data.parser.TTMLParser
 import com.amll.droidmate.data.network.NeteaseEapiCrypto
 import com.amll.droidmate.data.network.QqMusicQrcCrypto
 import com.amll.droidmate.data.network.KugouDecrypter
@@ -380,6 +381,8 @@ class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchNetease(title: String, artist: String): LyricsSearchResult? {
         return try {
             val keyword = "$title $artist".trim()
+            Timber.d("Netease search starting for keyword: $keyword")
+            Timber.d("  Search terms - Title: '$title' | Artist: '$artist'")
 
             val payload = buildJsonObject {
                 put("s", keyword)
@@ -407,33 +410,60 @@ class LyricsRepository(private val httpClient: HttpClient) {
             
             val json = Json { ignoreUnknownKeys = true }
             val responseBody = response.body<String>()
+            Timber.d("Netease search response (first 1000 chars): ${responseBody.take(1000)}")
+            
             val responseJson = json.parseToJsonElement(responseBody).jsonObject
             val code = responseJson["code"]?.jsonPrimitive?.intOrNull
-            if (code != null && code != 200) return null
+            Timber.d("Netease search response code: $code")
+            
+            if (code != null && code != 200) {
+                Timber.w("Netease search returned non-200 code: $code")
+                return null
+            }
             
             // 解析搜索结果
             val songList = responseJson["result"]
                 ?.jsonObject?.get("songs")
                 ?.jsonArray
             
+            Timber.d("Netease search found ${songList?.size ?: 0} song candidates")
+            
             if (songList.isNullOrEmpty()) {
-                Timber.d("No Netease results found for: $keyword")
+                Timber.w("No Netease results found for: $keyword")
                 return null
             }
             
             // 遍历所有候选，找到最佳匹配（对齐 Unilyric 逻辑）
             var bestMatch: LyricsSearchResult? = null
             var bestScore = -1
+            var evaluatedCount = 0
             
-            for (songElement in songList) {
+            for ((index, songElement) in songList.withIndex()) {
                 val song = songElement.jsonObject
-                val songId = song["id"]?.jsonPrimitive?.long?.toString() ?: continue
-                val songTitle = song["name"]?.jsonPrimitive?.content ?: continue
-                val singerName = song["artists"]?.jsonArray
-                    ?.joinToString(", ") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "" }
-                    ?.takeIf { it.isNotBlank() } ?: continue
-                val albumName = song["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content
-                val durationMs = song["duration"]?.jsonPrimitive?.longOrNull
+                val songId = song["id"]?.jsonPrimitive?.long?.toString()
+                val songTitle = song["name"]?.jsonPrimitive?.content
+                // 网易云 cloudsearch 通常使用 ar/al/dt；保留 artists/album/duration 兼容旧结构
+                val artistArray = song["ar"]?.jsonArray ?: song["artists"]?.jsonArray
+                val singerName = artistArray
+                    ?.mapNotNull { artistElement ->
+                        artistElement.jsonObject["name"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                    ?.joinToString(", ")
+                    ?.takeIf { it.isNotBlank() }
+                val albumName = song["al"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+                    ?: song["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+                val durationMs = song["dt"]?.jsonPrimitive?.longOrNull
+                    ?: song["duration"]?.jsonPrimitive?.longOrNull
+                
+                // 检查必要字段
+                if (songId == null || songTitle == null || singerName == null) {
+                    Timber.d("Candidate #$index: Missing required fields (id=$songId, title=$songTitle, artist=$singerName)")
+                    Timber.d("  -> Available keys: ${song.keys}")
+                    continue
+                }
+                
+                evaluatedCount++
+                Timber.d("Candidate #$index: '$songTitle' - '$singerName' (id=$songId, duration=${durationMs}ms)")
                 
                 // 计算匹配度
                 val matchEval = evaluateMatch(
@@ -446,8 +476,13 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 )
                 val matchType = MatchType.valueOf(matchEval.matchType)
                 
+                Timber.d("  -> Evaluation: matchType=${matchEval.matchType}(score=${matchType.score}), confidence=${matchEval.confidence}")
+                
                 // 只考虑达到最低门槛的候选（VERY_LOW 以上）
-                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
+                if (matchType.score < MatchType.VERY_LOW.score) {
+                    Timber.d("  -> Score ${matchType.score} is BELOW threshold ${MatchType.VERY_LOW.score}, skipping")
+                } else if (matchType.score > bestScore) {
+                    val previousBest = bestScore
                     bestScore = matchType.score
                     bestMatch = LyricsSearchResult(
                         provider = "netease",
@@ -457,13 +492,18 @@ class LyricsRepository(private val httpClient: HttpClient) {
                         confidence = matchEval.confidence,
                         matchType = matchEval.matchType
                     )
+                    Timber.d("  -> New best match found! (was $previousBest, now $bestScore)")
+                } else {
+                    Timber.d("  -> Score ${matchType.score} is NOT better than best ${bestScore}, skipping")
                 }
             }
             
+            Timber.d("Netease search evaluation complete: evaluated $evaluatedCount / ${songList.size} candidates")
+            
             if (bestMatch != null) {
-                Timber.i("Found Netease best match: ${bestMatch.title} - ${bestMatch.artist} (id: ${bestMatch.songId}, confidence: ${bestMatch.confidence}, match=${bestMatch.matchType})")
+                Timber.i("Found Netease best match: ${bestMatch.title} - ${bestMatch.artist} (id: ${bestMatch.songId}, confidence: ${bestMatch.confidence})")
             } else {
-                Timber.d("No qualifying Netease match found for: $keyword")
+                Timber.w("No qualifying Netease match found for: $keyword (tried ${songList.size} candidates, detailed ${evaluatedCount} with required fields)")
             }
             
             bestMatch
@@ -960,13 +1000,15 @@ class LyricsRepository(private val httpClient: HttpClient) {
         }
 
         val sim = computeTextSame(n1, n2)
-        return when {
+        val result = when {
             sim > 90.0 -> NameMatchType.VERY_HIGH
             sim > 80.0 -> NameMatchType.HIGH
             sim > 68.0 -> NameMatchType.MEDIUM
             sim > 55.0 -> NameMatchType.LOW
             else -> NameMatchType.NO_MATCH
         }
+        Timber.d("        compareName: '$n1'(from '$raw1') vs '$n2'(from '$raw2') -> similarity=$sim, result=${result.name}(${result.score})")
+        return result
     }
 
     /**
@@ -1047,12 +1089,17 @@ class LyricsRepository(private val httpClient: HttpClient) {
         val artistMatch = compareArtists(searchArtist, resultArtist)
         val albumMatch = compareName(searchAlbum, resultAlbum)
         val durationMatch = compareDuration(searchDurationMs, resultDurationMs)
-
         val titleWeight = 1.0
         val artistWeight = 1.0
         val albumWeight = 0.4
         val durationWeight = 1.0
         val maxSingle = 7.0
+
+        Timber.d("    compareTrack details:")
+        Timber.d("      Title comparison: '$searchTitle' vs '$resultTitle' -> ${titleMatch?.name}(${titleMatch?.score ?: 0})")
+        Timber.d("      Artist comparison: '$searchArtist' vs '$resultArtist' -> ${artistMatch?.name}(${artistMatch?.score ?: 0})")
+        Timber.d("      Album comparison: '$searchAlbum' vs '$resultAlbum' -> ${albumMatch?.name}(${albumMatch?.score ?: 0})")
+        Timber.d("      Duration comparison: ${searchDurationMs}ms vs ${resultDurationMs}ms -> ${durationMatch?.name}(${durationMatch?.score ?: 0})")
 
         var totalScore = (durationMatch?.score ?: 0).toDouble() * durationWeight
         totalScore += (albumMatch?.score ?: 0).toDouble() * albumWeight
@@ -1070,6 +1117,8 @@ class LyricsRepository(private val httpClient: HttpClient) {
             totalScore
         }
 
+        Timber.d("      totalScore (raw): $totalScore, possibleScore: $possibleScore, normalized: $normalizedScore")
+
         val thresholds = listOf(
             21.0 to MatchType.PERFECT,
             19.0 to MatchType.VERY_HIGH,
@@ -1081,8 +1130,12 @@ class LyricsRepository(private val httpClient: HttpClient) {
         )
 
         for ((threshold, mt) in thresholds) {
-            if (normalizedScore > threshold) return mt
+            if (normalizedScore > threshold) {
+                Timber.d("      -> Result: $normalizedScore > $threshold = ${mt.name}(${mt.score})")
+                return mt
+            }
         }
+        Timber.d("      -> Result: $normalizedScore below all thresholds = NONE(0)")
         return MatchType.NONE
     }
     
@@ -1448,108 +1501,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
          */
         fun parseTTML(ttmlContent: String): TTMLLyrics? {
             return try {
-                val lines = mutableListOf<LyricLine>()
-                
-                // 正则表达式提取歌词行
-                val pTagRegex = Regex("""<p\b[^>]*begin="([^"]+)"[^>]*end="([^"]+)"[^>]*>(.*?)</p>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
-                val spanTagRegex = Regex("""<span\b([^>]*)>(.*?)</span>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
-                
-                for (match in pTagRegex.findAll(ttmlContent)) {
-                    val beginStr = match.groupValues[1]
-                    val endStr = match.groupValues[2]
-                    val content = match.groupValues[3]
-                    
-                    val beginMs = timeToMillis(beginStr)
-                    val endMs = timeToMillis(endStr)
-                    
-                    // 提取所有 span 内容（逐词信息）
-                    // 规则对齐 Unilyrics：仅在 span 之间存在“非换行空白”时保留空格；格式化换行不算空格。
-                    val words = mutableListOf<LyricWord>()
-                    var lineTranslation: String? = null
-                    var lineTransliteration: String? = null
-                    var previousSpanEnd = 0
-                    for (spanMatch in spanTagRegex.findAll(content)) {
-                        val betweenText = if (spanMatch.range.first > previousSpanEnd && previousSpanEnd <= content.length) {
-                            content.substring(previousSpanEnd, spanMatch.range.first)
-                        } else {
-                            ""
-                        }
-                        val hasExternalSpaceBefore = isWhitespaceDelimiterWithoutNewline(betweenText)
-
-                        val attrs = spanMatch.groupValues[1]
-                        val role = extractAttribute(attrs, "ttm:role") ?: extractAttribute(attrs, "role")
-                        val rawSpanText = decodeXmlEntities(
-                            spanMatch.groupValues[2].replace(Regex("""<[^>]+>"""), "")
-                        ).trim()
-
-                        if (!role.isNullOrBlank()) {
-                            when (role.lowercase()) {
-                                "x-translation" -> {
-                                    if (rawSpanText.isNotBlank()) lineTranslation = rawSpanText
-                                    previousSpanEnd = spanMatch.range.last + 1
-                                    continue
-                                }
-
-                                "x-roman", "x-romanization" -> {
-                                    if (rawSpanText.isNotBlank()) lineTransliteration = rawSpanText
-                                    previousSpanEnd = spanMatch.range.last + 1
-                                    continue
-                                }
-                            }
-                        }
-
-                        val spanBeginStr = extractAttribute(attrs, "begin")
-                        val spanEndStr = extractAttribute(attrs, "end")
-                        if (spanBeginStr.isNullOrBlank() || spanEndStr.isNullOrBlank()) {
-                            previousSpanEnd = spanMatch.range.last + 1
-                            continue
-                        }
-
-                        val spanBegin = timeToMillis(spanBeginStr)
-                        val spanEnd = timeToMillis(spanEndStr)
-                        val rawText = rawSpanText
-                        val normalizedWordText = normalizeWordText(rawText, hasExternalSpaceBefore, words)
-                        if (normalizedWordText != null) {
-                            words.add(LyricWord(word = normalizedWordText, startTime = spanBegin, endTime = spanEnd))
-                        }
-                        previousSpanEnd = spanMatch.range.last + 1
-                    }
-                    
-                    // 生成整行文本：按逐词文本原样拼接（空格已在 normalizeWordText 中处理）
-                    val fullText = if (words.isNotEmpty()) {
-                        words.joinToString(separator = "") { it.word }.trimEnd()
-                    } else {
-                        val contentWithoutAux = content.replace(
-                            Regex(
-                                """<span\b[^>]*(?:ttm:role|role)\s*=\s*"x-(?:translation|roman(?:ization)?)"[^>]*>.*?</span>""",
-                                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
-                            ),
-                            ""
-                        )
-                        decodeXmlEntities(contentWithoutAux.replace(Regex("<[^>]+>"), "")).trim()
-                    }
-                    
-                    if (fullText.isNotEmpty()) {
-                        lines.add(
-                            LyricLine(
-                                startTime = beginMs,
-                                endTime = endMs,
-                                text = fullText,
-                                translation = lineTranslation,
-                                transliteration = lineTransliteration,
-                                words = words
-                            )
-                        )
-                        // 调试日志：检查逐词数据
-                        if (words.isNotEmpty()) {
-                            Timber.d("TTML Line: '$fullText' (${words.size} words)")
-                            words.take(3).forEach { w ->
-                                Timber.d("  Word: '${w.word}' [${w.startTime}-${w.endTime}]")
-                            }
-                        }
-                    }
-                }
-                
+                val lines = TTMLParser.parse(ttmlContent)
                 TTMLLyrics(
                     metadata = TTMLMetadata(
                         title = "Unknown",
@@ -1597,32 +1549,25 @@ class LyricsRepository(private val httpClient: HttpClient) {
         }
 
         /**
-         * 对齐 Unilyrics 的空格语义：
-         * 1. 前导空白/外部空白归并到上一个词尾；
-         * 2. 尾随空白保留在当前词尾；
-         * 3. 纯空白 span 不作为词，仅作为空格语义。
+         * TTML <p>/<span> 空格保留策略：
+         * 1. span 之间的外部空白补到前一个词尾；
+         * 2. span 内文本（包括前后空格）按原样保留。
          */
         private fun normalizeWordText(
             rawText: String,
             hasExternalSpaceBefore: Boolean,
             words: MutableList<LyricWord>
         ): String? {
-            val hasLeadingSpace = rawText.firstOrNull()?.isWhitespace() == true
-            val hasTrailingSpace = rawText.lastOrNull()?.isWhitespace() == true
-            val trimmed = rawText.trim()
-
-            if (hasExternalSpaceBefore || hasLeadingSpace) {
+            // TTML <p>/<span> 中空格是可见内容，不能用 trim 抹掉。
+            if (hasExternalSpaceBefore) {
                 appendSpaceToPreviousWord(words)
             }
 
-            if (trimmed.isEmpty()) {
-                if (hasTrailingSpace) {
-                    appendSpaceToPreviousWord(words)
-                }
+            if (rawText.isEmpty()) {
                 return null
             }
 
-            return if (hasTrailingSpace) "$trimmed " else trimmed
+            return rawText
         }
         
         /**

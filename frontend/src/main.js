@@ -103,6 +103,17 @@ const state = {
   lyricLines: [],
   currentTime: 0,
   isSeeking: false,
+  blur: {
+    enabled: true,
+    timeoutId: null,
+    TIMEOUT_MS: 5000, // 5秒
+  },
+  touch: {
+    startX: 0,
+    startY: 0,
+    startTime: 0,
+    isMoved: false,
+  },
 }
 
 let player = null
@@ -180,6 +191,102 @@ function applyMotionProfile(profile) {
   callPlayer('setLineScaleSpringParams', currentProfile.lineScaleSpringParams)
 }
 
+function resetBlurTimeout() {
+  // 清除旧的计时器
+  if (state.blur.timeoutId !== null) {
+    clearTimeout(state.blur.timeoutId)
+  }
+  
+  // 设置新的计时器，5秒后恢复模糊
+  state.blur.timeoutId = setTimeout(() => {
+    if (player && state.blur.enabled === false) {
+      callPlayer('setEnableBlur', true)
+      state.blur.enabled = true
+      logToAndroid('[AMLL-BLUR] Blur restored after 5s inactivity')
+    }
+    state.blur.timeoutId = null
+  }, state.blur.TIMEOUT_MS)
+}
+
+function handleTouchStart() {
+  // 记录触摸位置和时间
+  state.touch.startX = event?.touches?.[0]?.clientX ?? 0
+  state.touch.startY = event?.touches?.[0]?.clientY ?? 0
+  state.touch.startTime = Date.now()
+  state.touch.isMoved = false
+  
+  // 用户开始触摸时，取消模糊以便浏览
+  if (player && state.blur.enabled === true) {
+    callPlayer('setEnableBlur', false)
+    state.blur.enabled = false
+    logToAndroid('[AMLL-BLUR] Blur disabled on touch')
+  }
+  
+  // 重置计时器
+  resetBlurTimeout()
+}
+
+function handleTouchMove(e) {
+  // 检测是否有显著移动 (大于10像素)
+  const moveX = Math.abs((e?.touches?.[0]?.clientX ?? 0) - state.touch.startX)
+  const moveY = Math.abs((e?.touches?.[0]?.clientY ?? 0) - state.touch.startY)
+  
+  if (moveX > 10 || moveY > 10) {
+    state.touch.isMoved = true
+  }
+  
+  // 在滑动时也重置计时器，延迟恢复时间
+  if (state.blur.timeoutId !== null) {
+    clearTimeout(state.blur.timeoutId)
+  }
+  resetBlurTimeout()
+}
+
+function handleTouchEnd(e) {
+  const touchDuration = Date.now() - state.touch.startTime
+  
+  // 如果是快速短按（<300ms）且没有明显移动，视为点击
+  if (!state.touch.isMoved && touchDuration < 300) {
+    const x = e?.changedTouches?.[0]?.clientX ?? state.touch.startX
+    const y = e?.changedTouches?.[0]?.clientY ?? state.touch.startY
+    
+    logToAndroid(`[AMLL-TAP] Tap detected at coordinates (${x}, ${y}), duration=${touchDuration}ms`)
+    
+    // 模拟点击事件
+    try {
+      const element = document.elementFromPoint(x, y)
+      if (element) {
+        logToAndroid(`[AMLL-TAP] Clicked element: ${element.tagName}, class=${element.className}`)
+        
+        // 尝试在其最近的歌词行容器上触发点击
+        let lyricLine = element.closest('._lyricLine_1vq69_6, ._lyricLine_1ygrf_6')
+        if (!lyricLine) {
+          lyricLine = element.closest('[class*="lyric"]')
+        }
+        
+        if (lyricLine) {
+          logToAndroid(`[AMLL-TAP] Found lyric line element`)
+          lyricLine.click?.()
+          
+          // 如果无法通过该方法触发，尝试手动分发click事件
+          const clickEvent = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          })
+          lyricLine.dispatchEvent(clickEvent)
+          logToAndroid(`[AMLL-TAP] Dispatched click event`)
+        }
+      }
+    } catch (error) {
+      logToAndroid(`[AMLL-TAP-ERROR] ${error?.message || error}`)
+    }
+  }
+  
+  // 重置计时器，继续倒计时
+  resetBlurTimeout()
+}
+
 function markSeeking(now) {
   state.isSeeking = true
   seekUntilTs = now + SEEK_HOLD_MS
@@ -218,7 +325,7 @@ function applyPlayerStyle(element) {
   element.style.setProperty('--amll-lp-color', '#f5f7ff')
   element.style.setProperty('--amll-lp-bg-color', 'rgba(0, 0, 0, 0.28)')
   element.style.setProperty('--amll-lp-hover-bg-color', 'rgba(255, 255, 255, 0.12)')
-  element.style.setProperty('--amll-lp-font-size', 'clamp(20px, 5.2vh, 52px)')
+  element.style.setProperty('--amll-lp-font-size', 'clamp(22px, 3.6vh, 32px)')
 }
 
 function animationFrameLoop() {
@@ -279,15 +386,40 @@ function mountPlayer() {
       player.addEventListener('line-click', (evt) => {
         try {
           const lineIndex = Number(evt?.lineIndex ?? -1)
-          const startTime = Math.trunc(Number(evt?.line?.getLine?.()?.startTime ?? 0))
+          const line = evt?.line
+          let startTime = 0
+          
+          // 尝试多种方式获取 startTime
+          if (line && typeof line.getLine === 'function') {
+            const lineData = line.getLine()
+            startTime = Math.trunc(Number(lineData?.startTime ?? 0))
+            logToAndroid(`[AMLL-CLICK] Line ${lineIndex} found via getLine(), startTime=${startTime}ms`)
+          } else if (line?.startTime !== undefined) {
+            startTime = Math.trunc(Number(line.startTime))
+            logToAndroid(`[AMLL-CLICK] Line ${lineIndex} found via direct property, startTime=${startTime}ms`)
+          } else if (evt?.startTime !== undefined) {
+            startTime = Math.trunc(Number(evt.startTime))
+            logToAndroid(`[AMLL-CLICK] Line ${lineIndex} found via evt.startTime, startTime=${startTime}ms`)
+          } else {
+            logToAndroid(`[AMLL-CLICK] Line ${lineIndex} clicked but startTime not found, using 0`)
+          }
+          
           if (typeof Android !== 'undefined' && Android?.onLineClick) {
             Android.onLineClick(lineIndex, startTime)
+            logToAndroid(`[AMLL-CLICK] ✓ Called Android.onLineClick(${lineIndex}, ${startTime})`)
+          } else {
+            logToAndroid(`[AMLL-ERROR] Android.onLineClick not available`)
           }
         } catch (error) {
-          logToAndroid(`[AMLL-ERROR] line-click bridge error: ${error?.message || error}`)
+          logToAndroid(`[AMLL-ERROR] line-click handler exception: ${error?.message || error}`)
         }
       })
     }
+
+    // 为app容器添加触摸事件监听器
+    app.addEventListener('touchstart', handleTouchStart, false)
+    app.addEventListener('touchmove', handleTouchMove, false)
+    app.addEventListener('touchend', handleTouchEnd, false)
 
     callPlayer('setLyricLines', [])
     callPlayer('setCurrentTime', 0, false)
@@ -372,6 +504,29 @@ window.configureLyricMotion = function (options) {
   logToAndroid('[AMLL-CALL] configureLyricMotion applied')
 }
 
+window.setBlurEnabled = function (enabled) {
+  const shouldEnable = Boolean(enabled)
+  if (player && state.blur.enabled !== shouldEnable) {
+    callPlayer('setEnableBlur', shouldEnable)
+    state.blur.enabled = shouldEnable
+    logToAndroid(`[AMLL-BLUR] setBlurEnabled(${shouldEnable})`)
+    
+    // 仅在启用模糊时清除计时器，禁用时不清除
+    if (shouldEnable && state.blur.timeoutId !== null) {
+      clearTimeout(state.blur.timeoutId)
+      state.blur.timeoutId = null
+    }
+  }
+}
+
+window.setBlurTimeout = function (timeMs) {
+  const ms = Number(timeMs)
+  if (Number.isFinite(ms) && ms > 0) {
+    state.blur.TIMEOUT_MS = ms
+    logToAndroid(`[AMLL-BLUR] Blur timeout set to ${ms}ms`)
+  }
+}
+
 window.setBackgroundRenderer = function (mode) {
   const normalized = String(mode ?? '').toLowerCase()
   const renderer = normalized === 'mesh' ? 'mesh' : 'pixi'
@@ -425,10 +580,28 @@ window.logFromKotlin = function (message) {
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.style.background = 'transparent'
   document.body.style.background = 'transparent'
+  
+  // 检查 Android 接口是否可用
+  if (typeof Android !== 'undefined' && Android?.log) {
+    if (typeof Android.onLineClick === 'function') {
+      logToAndroid('[AMLL-INIT] Android.onLineClick interface is ready')
+    } else {
+      logToAndroid('[AMLL-INIT] WARNING: Android.onLineClick interface NOT found')
+    }
+  } else {
+    logToAndroid('[AMLL-INIT] WARNING: Android interface NOT available')
+  }
+  
   mountPlayer()
 })
 
 window.addEventListener('beforeunload', () => {
+  // 清除blur计时器
+  if (state.blur.timeoutId !== null) {
+    clearTimeout(state.blur.timeoutId)
+    state.blur.timeoutId = null
+  }
+  
   if (rafId != null) {
     window.cancelAnimationFrame(rafId)
     rafId = null

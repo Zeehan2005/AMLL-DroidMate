@@ -142,6 +142,7 @@ fun MainScreen() {
         animationSpec = tween(durationMillis = 220),
         label = "fullscreenOverlayAlpha"
     )
+    var webViewReloadKey by remember { mutableStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     var showOpenAppDialog by remember { mutableStateOf(false) }
     val customLyricsLauncher = rememberLauncherForActivityResult(
@@ -178,6 +179,11 @@ fun MainScreen() {
 
     LaunchedEffect(Unit) {
         viewModel.refreshLyricNotification()
+    }
+
+    LaunchedEffect(webViewReloadKey) {
+        Timber.i("[reload] webViewReloadKey changed -> $webViewReloadKey")
+        Log.i(MAIN_SCREEN_LOG_TAG, "[reload] webViewReloadKey changed -> $webViewReloadKey")
     }
 
     Box(
@@ -233,7 +239,11 @@ fun MainScreen() {
                                 },
                                 text = { Text("刷新") },
                                 onClick = {
-                                    viewModel.fetchLyrics()
+                                    Timber.i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
+                                    Log.i(MAIN_SCREEN_LOG_TAG, "[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
+                                    webViewReloadKey += 1
+                                    Timber.i("[reload] Refresh handled, newKey=$webViewReloadKey")
+                                    Log.i(MAIN_SCREEN_LOG_TAG, "[reload] Refresh handled, newKey=$webViewReloadKey")
                                     showMenu = false
                                 }
                             )
@@ -330,6 +340,7 @@ fun MainScreen() {
                             nowPlaying = nowPlaying,
                             lyrics = currentLyrics,
                             currentTime = currentTime,
+                            webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
                                 Timber.i("[embedded] onLineSeek($seekTime)")
                                 Log.i(MAIN_SCREEN_LOG_TAG, "[embedded] onLineSeek($seekTime)")
@@ -434,6 +445,7 @@ fun MainScreen() {
                             nowPlaying = nowPlaying,
                             lyrics = fullscreenLyrics,
                             currentTime = currentTime,
+                            webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
                                 Timber.i("[fullscreen] onLineSeek($seekTime)")
                                 Log.i(MAIN_SCREEN_LOG_TAG, "[fullscreen] onLineSeek($seekTime)")
@@ -464,11 +476,17 @@ private fun LyricsVisualLayer(
     nowPlaying: NowPlayingMusic?,
     lyrics: TTMLLyrics,
     currentTime: Long,
+    webViewReloadKey: Int,
     onLineSeek: (Long) -> Unit,
     amllDebugSource: String,
     onFullscreenTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    LaunchedEffect(webViewReloadKey, amllDebugSource) {
+        Timber.i("[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
+        Log.i(MAIN_SCREEN_LOG_TAG, "[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -500,15 +518,17 @@ private fun LyricsVisualLayer(
                 )
         )
 
-        AMLLLyricsView(
-            lyrics = lyrics,
-            currentTime = currentTime,
-            albumArtUri = nowPlaying?.albumArtUri,
-            renderMode = AMLLRenderMode.DOM,
-            debugSource = amllDebugSource,
-            onLineSeek = onLineSeek,
-            modifier = Modifier.fillMaxSize()
-        )
+        androidx.compose.runtime.key(webViewReloadKey, amllDebugSource) {
+            AMLLLyricsView(
+                lyrics = lyrics,
+                currentTime = currentTime,
+                albumArtUri = nowPlaying?.albumArtUri,
+                renderMode = AMLLRenderMode.DOM,
+                debugSource = amllDebugSource,
+                onLineSeek = onLineSeek,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Transparent overlay to reliably capture tap-to-fullscreen over WebView.
         if (onFullscreenTap != null) {

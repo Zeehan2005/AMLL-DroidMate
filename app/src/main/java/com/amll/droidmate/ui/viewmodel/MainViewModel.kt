@@ -136,12 +136,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
                 if (cached != null) {
+                    // 兼容修复前的酷狗缓存：旧数据可能已经丢失英文词间空格，需强制走一次在线刷新。
+                    val shouldBypassCache = cached.source.contains("kugou", ignoreCase = true) ||
+                        cached.source.contains("酷狗")
+                    if (shouldBypassCache) {
+                        Timber.i("Bypassing stale Kugou cache to refresh whitespace-fixed lyrics")
+                    } else {
                     val parsed = LyricsRepository.parseTTML(cached.ttmlContent)
                     if (parsed != null) {
                         _lyrics.value = parsed
                         _errorMessage.value = null
                         Timber.i("Loaded lyrics from cache: ${cached.title} - ${cached.artist} (${cached.source})")
                         return@launch
+                    }
                     }
                 }
                 

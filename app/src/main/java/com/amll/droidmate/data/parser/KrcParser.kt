@@ -75,28 +75,24 @@ object KrcParser {
             val syllableStartMs = lineStartMs + offsetMs
             val syllableEndMs = syllableStartMs + durationMs
             
-            // KRC 通常每个标签是一个字或词
-            val trimmedText = text.trim()
-            if (trimmedText.isNotEmpty()) {
-                // 保留尾随空格（如果有）
-                val hasTrailingSpace = text.endsWith(" ") || text.endsWith("　")
-                val wordText = if (hasTrailingSpace) "$trimmedText " else trimmedText
-                
+            // KRC 音节文本里的空格是可见语义（尤其英文单词间分隔），不能 trim 掉。
+            val normalizedWordText = normalizeWordText(text, words)
+            if (normalizedWordText != null) {
                 words.add(
                     LyricWord(
-                        word = wordText,
+                        word = normalizedWordText,
                         startTime = syllableStartMs,
                         endTime = syllableEndMs
                     )
                 )
-                fullText += wordText
+                fullText += normalizedWordText
             }
         }
         
         // 如果没有解析到任何词，尝试提取纯文本
         if (words.isEmpty()) {
             // 移除所有时间标签，获取纯文本
-            val plainText = SYLLABLE_REGEX.replace(contentAfterTimestamp) { it.groupValues[3] }.trim()
+            val plainText = SYLLABLE_REGEX.replace(contentAfterTimestamp) { it.groupValues[3] }
             if (plainText.isNotEmpty()) {
                 fullText = plainText
                 words.add(
@@ -112,9 +108,29 @@ object KrcParser {
         return LyricLine(
             startTime = lineStartMs,
             endTime = lineEndMs,
-            text = fullText.trim(),
+            // KRC 行文本保持原始可见空格，不做 trim。
+            text = fullText,
             words = words
         )
+    }
+
+    /**
+     * KRC 空格保留策略：
+     * 1. 纯空白音节并入前一个词尾，避免产生“空白词”；
+     * 2. 其他文本（包含前后空格）原样保留。
+     */
+    private fun normalizeWordText(rawText: String, words: MutableList<LyricWord>): String? {
+        if (rawText.isEmpty()) return null
+
+        if (rawText.isBlank()) {
+            if (words.isNotEmpty()) {
+                val last = words.last()
+                words[words.lastIndex] = last.copy(word = last.word + rawText)
+            }
+            return null
+        }
+
+        return rawText
     }
     
     /**

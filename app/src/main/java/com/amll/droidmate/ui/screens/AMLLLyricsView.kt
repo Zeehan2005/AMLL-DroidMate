@@ -19,9 +19,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.amll.droidmate.ui.AppSettings
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amll.droidmate.domain.model.TTMLLyrics
 import timber.log.Timber
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -68,6 +70,8 @@ fun AMLLLyricsView(
     var lastLyrics by remember { mutableStateOf<TTMLLyrics?>(null) }
     var lastLyricsPayload by remember { mutableStateOf<String?>(null) }
     var lastAlbumArtUri by remember { mutableStateOf<String?>(null) }
+    var lastFontFamily by remember { mutableStateOf<String?>(null) }
+    var lastFontFileUri by remember { mutableStateOf<String?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -89,6 +93,8 @@ fun AMLLLyricsView(
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
+                        lastFontFamily = null
+                        lastFontFileUri = null
                         amllDebug("[$debugSource#$instanceId] WebView page started: $url")
                     }
 
@@ -100,6 +106,8 @@ fun AMLLLyricsView(
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
+                        lastFontFamily = null
+                        lastFontFileUri = null
                         // 确保页面加载后背景仍然透明
                         view.setBackgroundColor(Color.TRANSPARENT)
                         amllDebug("[$debugSource#$instanceId] WebView page finished: $url")
@@ -208,6 +216,27 @@ fun AMLLLyricsView(
                 amllDebug("[$debugSource#$instanceId] Bridge call: updateAlbumArt(uri=${if (albumArtUri.isNullOrBlank()) "empty" else "present"})")
                 view.evaluateJavascript("window.updateAlbumArt && window.updateAlbumArt(\"$escapedAlbumUri\");", null)
                 lastAlbumArtUri = albumArtUri
+            }
+
+            val configuredFontFamily = AppSettings.getAmllFontFamily(view.context)
+            val configuredFontPath = AppSettings.getAmllFontFilePath(view.context)
+            val configuredFontUri = configuredFontPath
+                ?.takeIf { it.isNotBlank() }
+                ?.let { File(it) }
+                ?.takeIf { it.exists() }
+                ?.toURI()
+                ?.toString()
+
+            if (lastFontFamily != configuredFontFamily || lastFontFileUri != configuredFontUri) {
+                val escapedFamily = escapeJsString(configuredFontFamily)
+                val escapedUri = escapeJsString(configuredFontUri ?: "")
+                amllDebug("[$debugSource#$instanceId] Bridge call: setFontSettings(customFile=${if (configuredFontUri.isNullOrBlank()) "none" else "present"})")
+                view.evaluateJavascript(
+                    "window.setFontSettings && window.setFontSettings(\"$escapedFamily\", \"$escapedUri\");",
+                    null
+                )
+                lastFontFamily = configuredFontFamily
+                lastFontFileUri = configuredFontUri
             }
 
             Log.v(AMLL_LOG_TAG, "[$debugSource#$instanceId] Bridge call: updateTime($currentTime)")

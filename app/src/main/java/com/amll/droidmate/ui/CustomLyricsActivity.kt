@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -105,6 +107,25 @@ private fun CustomLyricsPage(
     val context = androidx.compose.ui.platform.LocalContext.current
     var manualText by remember { mutableStateOf("") }
 
+    // File picker launcher for importing lyrics from file
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val fileContent = inputStream.bufferedReader().use { it.readText() }
+                    manualText = fileContent
+                } else {
+                    // Error reading file
+                }
+            } catch (e: Exception) {
+                // Error handling
+            }
+        }
+    }
+
     LaunchedEffect(title, artist) {
         viewModel.searchCandidates(title, artist)
     }
@@ -198,12 +219,24 @@ private fun CustomLyricsPage(
                 minLines = 8
             )
 
-            Button(
-                onClick = { viewModel.applyManualInput(manualText, title, artist) },
-                enabled = manualText.isNotBlank() && !isApplying,
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(if (isApplying) "处理中..." else "应用到当前歌曲")
+                Button(
+                    onClick = { viewModel.applyManualInput(manualText, title, artist) },
+                    enabled = manualText.isNotBlank() && !isApplying,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(if (isApplying) "处理中..." else "应用到当前歌曲")
+                }
+                Button(
+                    onClick = { filePickerLauncher.launch("*/*") },
+                    enabled = !isApplying,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("从文件导入")
+                }
             }
 
             if (!errorMessage.isNullOrBlank()) {

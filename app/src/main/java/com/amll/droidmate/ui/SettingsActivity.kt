@@ -7,11 +7,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +32,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
@@ -46,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.amll.droidmate.ui.theme.DroidMateTheme
+import java.io.File
+import java.io.IOException
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +85,29 @@ private fun SettingsPage(
     val context = androidx.compose.ui.platform.LocalContext.current
     var selectedAction by remember { mutableStateOf(AppSettings.getCardClickAction(context)) }
     var lyricNotificationEnabled by remember { mutableStateOf(AppSettings.isLyricNotificationEnabled(context)) }
+    var amllFontFamily by remember { mutableStateOf(AppSettings.getAmllFontFamily(context)) }
+    var importedFontName by remember { mutableStateOf(AppSettings.getAmllFontFileName(context)) }
+    var fontStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    val importFontLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        try {
+            val oldPath = AppSettings.getAmllFontFilePath(context)
+            val result = importFontToInternalStorage(context, uri)
+            AppSettings.setAmllFontFile(context, result.absolutePath, result.displayName)
+            if (!oldPath.isNullOrBlank() && oldPath != result.absolutePath) {
+                File(oldPath).takeIf { it.exists() }?.delete()
+            }
+            importedFontName = result.displayName
+            fontStatusMessage = "字体已导入: ${result.displayName}"
+        } catch (e: Exception) {
+            fontStatusMessage = "导入失败: ${e.message ?: "未知错误"}"
+        }
+    }
+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -102,6 +131,7 @@ private fun SettingsPage(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -147,6 +177,7 @@ private fun SettingsPage(
                     )
                 }
             }
+
 
             Text(
                 text = "“正在播放”卡片点击行为",
@@ -243,6 +274,47 @@ private fun SettingsPage(
             }
         }
     }
+}
+
+private data class ImportedFontResult(
+    val absolutePath: String,
+    val displayName: String
+)
+
+@Throws(IOException::class)
+private fun importFontToInternalStorage(context: android.content.Context, sourceUri: Uri): ImportedFontResult {
+    val resolver = context.contentResolver
+    val displayName = queryDisplayName(context, sourceUri) ?: "custom_font_${System.currentTimeMillis()}.ttf"
+    val safeName = displayName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+    val fontDir = File(context.filesDir, "amll_fonts")
+    if (!fontDir.exists()) {
+        fontDir.mkdirs()
+    }
+
+    val outFile = File(fontDir, safeName)
+    resolver.openInputStream(sourceUri).use { input ->
+        if (input == null) throw IOException("无法打开字体文件")
+        outFile.outputStream().use { output ->
+            input.copyTo(output)
+        }
+    }
+
+    return ImportedFontResult(
+        absolutePath = outFile.absolutePath,
+        displayName = displayName
+    )
+}
+
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String? {
+    val resolver = context.contentResolver
+    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (nameIndex >= 0 && cursor.moveToFirst()) {
+            return cursor.getString(nameIndex)
+        }
+    }
+    return null
 }
 
 private fun needsNotificationPermission(): Boolean {

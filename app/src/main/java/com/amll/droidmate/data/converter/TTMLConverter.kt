@@ -67,56 +67,70 @@ object TTMLConverter {
             val begin = formatTime(line.startTime)
             val end = formatTime(line.endTime)
             val lineNum = "L${index + 1}"
+            val agentAttr = if (line.isDuet) " ttm:agent=\"v2\"" else ""
             
-            sb.append("""${indent}${indent}<p begin="$begin" end="$end" itunes:key="$lineNum" ttm:agent="v1">""")
+            sb.append("""${indent}${indent}<p begin="$begin" end="$end" itunes:key="$lineNum"$agentAttr>""")
             if (formatted) sb.append("\n")
+
+            val lineContentIndent = "${indent}${indent}${indent}"
+            val lineWrapPrefix = if (line.isBG) "<span ttm:role=\"x-bg\">" else ""
+            val lineWrapSuffix = if (line.isBG) "</span>" else ""
+
+            if (line.isBG) {
+                sb.append("""$lineContentIndent$lineWrapPrefix""")
+                if (formatted) sb.append("\n")
+            }
+
+            val spanIndent = if (line.isBG) {
+                "${indent}${indent}${indent}${indent}"
+            } else {
+                lineContentIndent
+            }
             
             // Main lyrics - 如果有 words 数组则逐词输出，否则整行输出
             if (line.words.isNotEmpty()) {
-                // 逐词输出，空格语义对齐 Unilyrics:
-                // - pretty(format=true): 词尾空格保留在 span 文本内
-                // - compact(format=false): 词尾空格输出为 span 之间的纯文本空格
+                // 警示后人：<p>/<span> 内空格是可见歌词语义，不能对词文本做 trim。
+                // 这里最多仅清理换行控制字符，避免导出后把 "a b" 变成 "ab"。
                 line.words.forEachIndexed { index, word ->
                     val wordBegin = formatTime(word.startTime)
                     val wordEnd = formatTime(word.endTime)
 
-                    val rawWord = word.word
-                    val hasTrailingSpace = rawWord.lastOrNull()?.isWhitespace() == true
-                    val cleanWord = rawWord.trim()
+                    val spanText = word.word
+                        .replace("\r", "")
+                        .replace("\n", "")
 
-                    if (cleanWord.isEmpty()) {
-                        // 对齐 Unilyrics: 紧凑模式下，空白词节点作为词间空格文本处理
+                    if (spanText.isEmpty()) {
+                        // 保留空白词节点的最小分隔语义，避免词间被完全粘连。
                         if (!formatted && index < line.words.lastIndex) {
                             sb.append(" ")
                         }
                         return@forEachIndexed
                     }
 
-                    val spanText = if (formatted && hasTrailingSpace) "$cleanWord " else cleanWord
-                    sb.append("""${indent}${indent}${indent}<span begin="$wordBegin" end="$wordEnd">${escapeXML(spanText)}</span>""")
-
-                    // 紧凑模式下，把尾随空格写成 span 间文本，和 Unilyrics 逻辑一致
-                    if (!formatted && hasTrailingSpace && index < line.words.lastIndex) {
-                        sb.append(" ")
-                    }
+                    sb.append("""$spanIndent<span begin="$wordBegin" end="$wordEnd">${escapeXML(spanText)}</span>""")
 
                     if (formatted) sb.append("\n")
                 }
             } else {
                 // 整行输出
-                sb.append("""${indent}${indent}${indent}<span begin="$begin" end="$end">${escapeXML(line.text)}</span>""")
+                sb.append("""$spanIndent<span begin="$begin" end="$end">${escapeXML(line.text)}</span>""")
+                if (formatted) sb.append("\n")
+            }
+
+            if (line.isBG) {
+                sb.append("""$lineContentIndent$lineWrapSuffix""")
                 if (formatted) sb.append("\n")
             }
             
             // Translation if available
             line.translation?.let {
-                sb.append("""${indent}${indent}${indent}<span ttm:role="x-translation" xml:lang="zh-CN">${escapeXML(it)}</span>""")
+                sb.append("""$lineContentIndent<span ttm:role="x-translation" xml:lang="zh-CN">${escapeXML(it)}</span>""")
                 if (formatted) sb.append("\n")
             }
             
             // Transliteration if available
             line.transliteration?.let {
-                sb.append("""${indent}${indent}${indent}<span ttm:role="x-roman" xml:lang="ja-Latn">${escapeXML(it)}</span>""")
+                sb.append("""$lineContentIndent<span ttm:role="x-roman" xml:lang="ja-Latn">${escapeXML(it)}</span>""")
                 if (formatted) sb.append("\n")
             }
             
