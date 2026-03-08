@@ -1,6 +1,14 @@
 # AMLL DroidMate - Android Lyrics Application
 
+傻瓜式 Android 端 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 外置歌词显示器
+
 一个功能强大的安卓应用，专为音乐爱好者设计，可以获取当前播放歌曲的信息和歌词，并以 TTML 格式显示，支持 Apple Music 风格的歌词展示。
+
+![Image](https://github.com/user-attachments/assets/c2cce2b5-a6cb-469f-9af9-6ca9eaaeb146)
+![Image](https://github.com/user-attachments/assets/7d7a3ab4-7a95-4cf9-bceb-f54aef6a4314)
+![Image](https://github.com/user-attachments/assets/59faa67c-92b5-477e-8685-272319945189)
+演示视频：https://github.com/user-attachments/assets/974c3c46-d964-41d8-bcd7-521f94c276b9
+
 ## ✨ 核心特性
 
 ### 🎵 智能多源歌词搜索 (基于 Unilyric 策略)
