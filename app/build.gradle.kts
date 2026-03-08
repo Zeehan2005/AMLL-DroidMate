@@ -1,4 +1,4 @@
-import com.android.build.api.variant.ApkVariantOutput
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,14 +53,11 @@ android {
     lint {
         disable += listOf("FullBackupContent", "NetworkSecurityConfig")
     }
-}
 
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        variant.outputs.forEach { output ->
-            (output as? ApkVariantOutput)?.outputFileName?.set(
-                "AMLL DroidMate Alpha $buildTimestamp Hello World.apk"
-            )
+    applicationVariants.all {
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName =
+                "AMLL-DroidMate-Alpha-$buildTimestamp-Hello-World.apk"
         }
     }
 }
