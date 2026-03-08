@@ -1,0 +1,171 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMLL Lyrics Player</title>
+    <link rel="stylesheet" href="./frontend.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        :root {
+            color-scheme: dark;
+            font-family: "SF Pro Display", "PingFang SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+        html {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+        }
+        #app {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background: transparent;
+        }
+
+        #app .amll-lyric-player {
+            background: transparent !important;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 0, 0, 0.4);
+            mix-blend-mode: normal !important;
+            -webkit-text-fill-color: #ffffff;
+            --amll-lp-color: #ffffff;
+            --amll-lp-bg-color: rgba(0, 0, 0, 0.15);
+            --amll-lp-hover-bg-color: rgba(255, 255, 255, 0.1);
+            --amll-lp-font-size: clamp(20px, 5.2vh, 52px);
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+        if (typeof Android !== 'undefined' && Android?.log) {
+            Android.log('[AMLL-INIT] index.html loaded')
+        }
+    </script>
+    <script src="./amll.bundle.js"></script>
+    <script>
+        (function () {
+            function log(msg) {
+                if (typeof Android !== 'undefined' && Android && Android.log) {
+                    Android.log('[AMLL-DEBUG] ' + msg)
+                }
+            }
+
+            function targetDesc(target) {
+                if (!target) return 'null'
+                const tag = target.tagName || 'unknown'
+                const cls = typeof target.className === 'string' ? target.className : ''
+                return tag + (cls ? '.' + cls : '')
+            }
+
+            function findLyricLineElement(target) {
+                if (!target || typeof target.closest !== 'function') return null
+                return target.closest('div[class*="_lyricLine_"]')
+            }
+
+            let lastNativeClickAt = 0
+            let pointerDownState = null
+            let fallbackTimer = null
+
+            document.addEventListener('click', function (ev) {
+                const lineEl = findLyricLineElement(ev.target)
+                if (lineEl) {
+                    lastNativeClickAt = Date.now()
+                    log('native click detected on lyric line, suppress fallback')
+                }
+            }, true)
+
+            document.addEventListener('pointerdown', function (ev) {
+                pointerDownState = {
+                    time: Date.now(),
+                    x: ev.clientX,
+                    y: ev.clientY,
+                    lineEl: findLyricLineElement(ev.target)
+                }
+            }, true)
+
+            document.addEventListener('pointerup', function (ev) {
+                if (!pointerDownState || !pointerDownState.lineEl) return
+
+                const dt = Date.now() - pointerDownState.time
+                const dx = (ev.clientX || 0) - (pointerDownState.x || 0)
+                const dy = (ev.clientY || 0) - (pointerDownState.y || 0)
+                const distance2 = dx * dx + dy * dy
+                const isTap = dt <= 350 && distance2 <= (14 * 14)
+
+                if (!isTap) {
+                    pointerDownState = null
+                    return
+                }
+
+                const lineEl = pointerDownState.lineEl
+                pointerDownState = null
+
+                if (fallbackTimer) {
+                    clearTimeout(fallbackTimer)
+                    fallbackTimer = null
+                }
+
+                // WebView mobile touch may not always synthesize click because the player consumes touch events.
+                // Delay briefly to allow native click first, then force click as a fallback.
+                fallbackTimer = setTimeout(function () {
+                    const sinceNativeClick = Date.now() - lastNativeClickAt
+                    if (sinceNativeClick < 180) {
+                        log('skip synthetic click, native click already fired')
+                        return
+                    }
+                    try {
+                        lineEl.click()
+                        log('synthetic click dispatched to lyric line fallback')
+                    } catch (err) {
+                        log('synthetic click failed: ' + (err && err.message ? err.message : String(err)))
+                    }
+                }, 140)
+            }, true)
+
+            ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click'].forEach(function (eventName) {
+                document.addEventListener(eventName, function (ev) {
+                    log('event=' + eventName + ', target=' + targetDesc(ev.target))
+                }, true)
+            })
+
+            const rawUpdateLyrics = window.updateLyrics
+            if (typeof rawUpdateLyrics === 'function') {
+                window.updateLyrics = function (payload) {
+                    const lineCount = Array.isArray(payload && payload.lines) ? payload.lines.length : 0
+                    log('window.updateLyrics called, lines=' + lineCount)
+                    return rawUpdateLyrics.apply(this, arguments)
+                }
+            }
+
+            const rawUpdateTime = window.updateTime
+            if (typeof rawUpdateTime === 'function') {
+                window.updateTime = function (time) {
+                    return rawUpdateTime.apply(this, arguments)
+                }
+            }
+
+            const rawSetRenderMode = window.setRenderMode
+            if (typeof rawSetRenderMode === 'function') {
+                window.setRenderMode = function (mode) {
+                    log('window.setRenderMode called, mode=' + mode)
+                    return rawSetRenderMode.apply(this, arguments)
+                }
+            }
+
+            log('post-bundle debug hooks installed')
+        })()
+    </script>
+</body>
+</html>

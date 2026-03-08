@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="file" path="." />
+    <exclude domain="file" path="cache" />
+    <exclude domain="file" path="code_cache" />
+    <exclude domain="file" path="no_backup" />
+    <exclude domain="database" path="system_prefs" />
+    <exclude domain="sharedpref" path="com.google.android.gms.measurement.prefs" />
+</full-backup-content>

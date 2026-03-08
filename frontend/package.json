@@ -1,0 +1,25 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:android": "vite build && powershell -NoProfile -Command \"Copy-Item -Path ./dist/* -Destination ../app/src/main/assets/amll -Force; Copy-Item -Path ./index.html -Destination ../app/src/main/assets/amll/index.html -Force\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@applemusic-like-lyrics/core": "^0.2.0",
+    "@applemusic-like-lyrics/react": "^0.2.0",
+    "@pixi/core": "^7.4.3",
+    "@pixi/utils": "^7.4.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^7.3.1"
+  }
+}
