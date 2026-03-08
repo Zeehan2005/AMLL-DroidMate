@@ -13,14 +13,15 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.amll.droidmate.MainActivity
 import com.amll.droidmate.R
+import com.amll.droidmate.domain.model.LyricLine
 
 class LyricNotificationManager(private val context: Context) {
 
-    fun showOrUpdate(currentLine: String) {
+    fun showOrUpdate(currentLine: LyricLine?) {
         if (!hasNotificationPermission()) return
 
         createChannelIfNeeded()
-        val safeLine = currentLine
+        val safeLine = buildNotificationText(currentLine)
         val contentIntent = createOpenAppIntent()
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -38,6 +39,21 @@ class LyricNotificationManager(private val context: Context) {
             .build()
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun buildNotificationText(currentLine: LyricLine?): String {
+        if (currentLine == null) return ""
+
+        val lines = listOf(
+            currentLine.text,
+            currentLine.translation,
+            currentLine.transliteration
+        )
+            .mapNotNull { it?.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+        return lines.joinToString(separator = "\n")
     }
 
     fun cancel() {

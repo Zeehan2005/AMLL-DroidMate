@@ -81,9 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentLine = lyrics.lines.firstOrNull { time in it.startTime..it.endTime }
             ?: lyrics.lines.lastOrNull { it.startTime <= time }
 
-        lyricNotificationManager.showOrUpdate(
-            currentLine = currentLine?.text.orEmpty()
-        )
+        lyricNotificationManager.showOrUpdate(currentLine)
     }
 
     fun refreshLyricNotification() {

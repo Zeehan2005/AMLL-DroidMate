@@ -1,8 +1,15 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
+
+val buildTimestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+    .format(Date())
 
 android {
     namespace = "com.amll.droidmate"
@@ -13,7 +20,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "Alpha 0.0.0001 Hello World"
+        versionName = "Alpha $buildTimestamp Hello World"
         vectorDrawables.useSupportLibrary = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

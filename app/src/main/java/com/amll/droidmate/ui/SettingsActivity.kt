@@ -3,6 +3,7 @@ package com.amll.droidmate.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
@@ -29,10 +30,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -196,6 +197,49 @@ private fun SettingsPage(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("打开通知访问设置")
+            }
+
+            Text(
+                text = "项目与贡献",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/Zeehan2005/AMLL-DroidMate")
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("项目仓库")
+                    }
+
+                    TextButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/amll-dev/amll-ttml-db/blob/main/README.md")
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("协助改进歌词")
+                    }
+                }
             }
         }
     }
