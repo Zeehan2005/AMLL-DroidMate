@@ -507,9 +507,7 @@ private fun LyricsVisualLayer(
             renderMode = AMLLRenderMode.DOM,
             debugSource = amllDebugSource,
             onLineSeek = onLineSeek,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 8.dp)
+            modifier = Modifier.fillMaxSize()
         )
 
         // Transparent overlay to reliably capture tap-to-fullscreen over WebView.
