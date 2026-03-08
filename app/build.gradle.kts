@@ -21,7 +21,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "Alpha $buildTimestamp Hello World" // 版本号
+        versionName = "Alpha $buildTimestamp" // 版本号
         vectorDrawables.useSupportLibrary = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -57,7 +57,7 @@ android {
     applicationVariants.all {
         outputs.all {
             (this as BaseVariantOutputImpl).outputFileName =
-                "AMLL-DroidMate-Alpha-$buildTimestamp-Hello-World.apk" // 版本号 APK
+                "AMLL-DroidMate-Alpha-$buildTimestamp.apk" // 版本号 APK
         }
     }
 }
