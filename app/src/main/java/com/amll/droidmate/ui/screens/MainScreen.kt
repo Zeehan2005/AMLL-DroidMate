@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -545,6 +547,19 @@ fun MainScreen() {
                 val window = activity.window
                 val insetsController = WindowCompat.getInsetsController(window, localView)
                 
+                // 允许内容扩展到刘海/打孔区域
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    window.attributes = window.attributes.apply {
+                        layoutInDisplayCutoutMode = if (controlsVisible) {
+                            // 控制按钮显示时使用默认模式
+                            android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                        } else {
+                            // 控制按钮隐藏时允许内容延伸到刘海区域
+                            android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                        }
+                    }
+                }
+                
                 if (controlsVisible) {
                     // 显示控制按钮时，短暂显示系统栏
                     insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
@@ -564,6 +579,15 @@ fun MainScreen() {
                     val activity = localView.context.findActivity() ?: return@onDispose
                     val window = activity.window
                     val insetsController = WindowCompat.getInsetsController(window, localView)
+                    
+                    // 恢复默认的刘海模式
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        window.attributes = window.attributes.apply {
+                            layoutInDisplayCutoutMode = 
+                                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                        }
+                    }
+                    
                     insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                     insetsController.systemBarsBehavior = 
                         androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
@@ -577,6 +601,7 @@ fun MainScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets(0, 0, 0, 0))  // 忽略所有 insets，让内容填充到刘海区域
                     .background(Color.Black.copy(alpha = 0.35f * fullscreenOverlayAlpha))
                     .pointerInput(Unit) {
                         // 使用 Final 阶段检测事件，不干扰子组件的交互
