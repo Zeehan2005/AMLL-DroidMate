@@ -82,6 +82,9 @@ dependencies {
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.5.0")
+    
+    // Palette for dynamic color extraction
+    implementation("androidx.palette:palette-ktx:1.0.0")
 
     // Networking
     implementation("io.ktor:ktor-client-core:2.3.6")

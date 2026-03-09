@@ -38,6 +38,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amll.droidmate.ui.theme.DroidMateTheme
+import com.amll.droidmate.ui.theme.DynamicThemeManager
 import com.amll.droidmate.ui.viewmodel.CustomLyricsCandidate
 import com.amll.droidmate.ui.viewmodel.CustomLyricsViewModel
 
@@ -59,7 +61,13 @@ class CustomLyricsActivity : ComponentActivity() {
         val artist = intent.getStringExtra(EXTRA_ARTIST).orEmpty()
 
         setContent {
-            DroidMateTheme {
+            val isDarkTheme = isSystemInDarkTheme()
+            val dynamicColorScheme by DynamicThemeManager.observeColorScheme()
+            
+            DroidMateTheme(
+                darkTheme = isDarkTheme,
+                dynamicColorScheme = dynamicColorScheme
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

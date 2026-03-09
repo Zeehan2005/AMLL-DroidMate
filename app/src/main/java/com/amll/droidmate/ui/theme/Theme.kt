@@ -25,12 +25,71 @@ private val LightColors = lightColorScheme(
     error = Color(0xFFEF4444),
 )
 
+/**
+ * DroidMate主题
+ * @param darkTheme 是否使用深色主题
+ * @param dynamicColorScheme 可选的动态颜色方案（从专辑封面提取）
+ * @param content Composable内容
+ */
 @Composable
 fun DroidMateTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColorScheme: DynamicColorScheme? = null,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColors else LightColors
+    val colorScheme = if (dynamicColorScheme != null) {
+        // 使用动态颜色方案
+        if (darkTheme) {
+            darkColorScheme(
+                primary = dynamicColorScheme.primary,
+                onPrimary = dynamicColorScheme.onPrimary,
+                primaryContainer = dynamicColorScheme.primary.copy(alpha = 0.3f),
+                onPrimaryContainer = dynamicColorScheme.onPrimary,
+                secondary = dynamicColorScheme.secondary,
+                onSecondary = dynamicColorScheme.onSecondary,
+                secondaryContainer = dynamicColorScheme.secondary.copy(alpha = 0.3f),
+                onSecondaryContainer = dynamicColorScheme.onSecondary,
+                tertiary = dynamicColorScheme.tertiary,
+                onTertiary = dynamicColorScheme.onTertiary,
+                tertiaryContainer = dynamicColorScheme.tertiary.copy(alpha = 0.3f),
+                onTertiaryContainer = dynamicColorScheme.onTertiary,
+                background = dynamicColorScheme.background,
+                onBackground = dynamicColorScheme.onBackground,
+                surface = dynamicColorScheme.surface,
+                onSurface = dynamicColorScheme.onSurface,
+                surfaceVariant = dynamicColorScheme.surfaceVariant,
+                onSurfaceVariant = dynamicColorScheme.onSurfaceVariant,
+                error = dynamicColorScheme.error,
+                onError = dynamicColorScheme.onError
+            )
+        } else {
+            lightColorScheme(
+                primary = dynamicColorScheme.primary,
+                onPrimary = dynamicColorScheme.onPrimary,
+                primaryContainer = dynamicColorScheme.primary.copy(alpha = 0.1f),
+                onPrimaryContainer = dynamicColorScheme.primary,
+                secondary = dynamicColorScheme.secondary,
+                onSecondary = dynamicColorScheme.onSecondary,
+                secondaryContainer = dynamicColorScheme.secondary.copy(alpha = 0.1f),
+                onSecondaryContainer = dynamicColorScheme.secondary,
+                tertiary = dynamicColorScheme.tertiary,
+                onTertiary = dynamicColorScheme.onTertiary,
+                tertiaryContainer = dynamicColorScheme.tertiary.copy(alpha = 0.1f),
+                onTertiaryContainer = dynamicColorScheme.tertiary,
+                background = dynamicColorScheme.background,
+                onBackground = dynamicColorScheme.onBackground,
+                surface = dynamicColorScheme.surface,
+                onSurface = dynamicColorScheme.onSurface,
+                surfaceVariant = dynamicColorScheme.surfaceVariant,
+                onSurfaceVariant = dynamicColorScheme.onSurfaceVariant,
+                error = dynamicColorScheme.error,
+                onError = dynamicColorScheme.onError
+            )
+        }
+    } else {
+        // 使用默认颜色方案
+        if (darkTheme) DarkColors else LightColors
+    }
 
     MaterialTheme(
         colorScheme = colorScheme,

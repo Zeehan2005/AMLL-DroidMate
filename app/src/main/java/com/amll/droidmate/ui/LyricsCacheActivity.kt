@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,6 +41,7 @@ import androidx.core.view.WindowCompat
 import com.amll.droidmate.data.repository.LyricsCacheRepository
 import com.amll.droidmate.domain.model.CachedLyricEntry
 import com.amll.droidmate.ui.theme.DroidMateTheme
+import com.amll.droidmate.ui.theme.DynamicThemeManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,7 +55,13 @@ class LyricsCacheActivity : ComponentActivity() {
         val repository = LyricsCacheRepository(applicationContext)
 
         setContent {
-            DroidMateTheme {
+            val isDarkTheme = isSystemInDarkTheme()
+            val dynamicColorScheme by DynamicThemeManager.observeColorScheme()
+            
+            DroidMateTheme(
+                darkTheme = isDarkTheme,
+                dynamicColorScheme = dynamicColorScheme
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

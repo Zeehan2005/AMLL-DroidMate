@@ -49,9 +49,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.amll.droidmate.ui.theme.DroidMateTheme
+import com.amll.droidmate.ui.theme.DynamicThemeManager
 import com.amll.droidmate.update.GitHubUpdateChecker
 import kotlinx.coroutines.launch
 import java.io.File
@@ -65,7 +67,13 @@ class SettingsActivity : ComponentActivity() {
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
-            DroidMateTheme {
+            val isDarkTheme = isSystemInDarkTheme()
+            val dynamicColorScheme by DynamicThemeManager.observeColorScheme()
+            
+            DroidMateTheme(
+                darkTheme = isDarkTheme,
+                dynamicColorScheme = dynamicColorScheme
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -377,7 +385,7 @@ private fun SettingsPage(
                 style = MaterialTheme.typography.titleMedium
             )
 
-            TextButton(
+            Button(
                 onClick = {
                     importedFonts = loadExistingFonts()
                     enabledFontIds = AppSettings.getEnabledAmllFontFileIds(context).toSet()
@@ -385,7 +393,7 @@ private fun SettingsPage(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("打开字体设置（二级菜单）")
+                Text("打开字体设置")
             }
             Text(                text = "辅助功能",
                 style = MaterialTheme.typography.titleMedium
