@@ -42,6 +42,8 @@ const DEFAULT_BG_PROFILE = {
   hasLyric: true,
 }
 
+const TOUCH_BG_BLUR_CLASS = 'amll-touch-unblur'
+
 function logToAndroid(message) {
   if (typeof Android !== 'undefined' && Android?.log) {
     Android.log(message)
@@ -262,6 +264,7 @@ function resetBlurTimeout() {
     if (player && state.blur.enabled === false) {
       callPlayer('setEnableBlur', true)
       state.blur.enabled = true
+      player.getElement?.().classList.remove(TOUCH_BG_BLUR_CLASS)
       logToAndroid('[AMLL-BLUR] Blur restored after 5s inactivity')
     }
     state.blur.timeoutId = null
@@ -274,15 +277,15 @@ function handleTouchStart() {
   state.touch.startY = event?.touches?.[0]?.clientY ?? 0
   state.touch.startTime = Date.now()
   state.touch.isMoved = false
-  
-  // 用户开始触摸时，取消模糊以便浏览
+
+  // 保持主歌词原有体验：触摸时取消模糊
   if (player && state.blur.enabled === true) {
     callPlayer('setEnableBlur', false)
     state.blur.enabled = false
-    logToAndroid('[AMLL-BLUR] Blur disabled on touch')
+    player.getElement?.().classList.add(TOUCH_BG_BLUR_CLASS)
+    logToAndroid('[AMLL-BLUR] Blur disabled on touch, keep BG blurred')
   }
-  
-  // 重置计时器
+
   resetBlurTimeout()
 }
 
@@ -294,8 +297,7 @@ function handleTouchMove(e) {
   if (moveX > 10 || moveY > 10) {
     state.touch.isMoved = true
   }
-  
-  // 在滑动时也重置计时器，延迟恢复时间
+
   if (state.blur.timeoutId !== null) {
     clearTimeout(state.blur.timeoutId)
   }
@@ -342,8 +344,7 @@ function handleTouchEnd(e) {
       logToAndroid(`[AMLL-TAP-ERROR] ${error?.message || error}`)
     }
   }
-  
-  // 重置计时器，继续倒计时
+
   resetBlurTimeout()
 }
 
@@ -386,6 +387,9 @@ function applyPlayerStyle(element) {
   element.style.setProperty('--amll-lp-bg-color', 'rgba(0, 0, 0, 0.28)')
   element.style.setProperty('--amll-lp-hover-bg-color', 'rgba(255, 255, 255, 0.12)')
   element.style.setProperty('--amll-lp-font-size', 'clamp(22px, 3.6vh, 32px)')
+
+  // 触摸导致全局去模糊时，仅对背景歌词加回固定模糊，主歌词保持清晰
+  element.style.setProperty('--amll-touch-bg-blur', '10px')
 }
 
 function animationFrameLoop() {
@@ -663,6 +667,19 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   
   mountPlayer()
+
+  const styleTag = document.createElement('style')
+  styleTag.id = 'amll-touch-bg-blur-style'
+  styleTag.textContent = `
+    .amll-lyric-player.${TOUCH_BG_BLUR_CLASS} [class*="lyricBgLine"] {
+      filter: blur(var(--amll-touch-bg-blur, 10px)) !important;
+    }
+
+    .amll-lyric-player.${TOUCH_BG_BLUR_CLASS} [class*="lyricBgLine"][class*="active"] {
+      filter: none !important;
+    }
+  `
+  document.head.appendChild(styleTag)
 })
 
 window.addEventListener('beforeunload', () => {
@@ -680,4 +697,7 @@ window.addEventListener('beforeunload', () => {
     backgroundRender.dispose()
     backgroundRender = null
   }
+
+  const styleTag = document.getElementById('amll-touch-bg-blur-style')
+  styleTag?.remove()
 })
