@@ -72,6 +72,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.activity:activity-compose:1.8.1")
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.palette:palette:1.0.0") // 专辑色提取依赖
 
     // Jetpack Compose
     implementation("androidx.compose.ui:ui")
@@ -82,9 +83,6 @@ dependencies {
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.5.0")
-    
-    // Palette for dynamic color extraction
-    implementation("androidx.palette:palette-ktx:1.0.0")
 
     // Networking
     implementation("io.ktor:ktor-client-core:2.3.6")

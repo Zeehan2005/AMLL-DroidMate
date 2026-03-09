@@ -39,6 +39,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     private val httpClient = HttpClientFactory.create(application.applicationContext)
 
     private val lyricsRepository = LyricsRepository(httpClient)
+    private val lyricsCacheRepository = com.amll.droidmate.data.repository.LyricsCacheRepository(application.applicationContext)
 
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates
@@ -64,6 +65,20 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             _candidates.value = emptyList()
             val mutex = Mutex()
             try {
+                // 优先插入缓存歌词
+                val cached = lyricsCacheRepository.findBySong(title, artist)
+                if (cached != null) {
+                    val candidate = CustomLyricsCandidate(
+                        provider = "cache",
+                        songId = cached.id,
+                        title = cached.title,
+                        artist = cached.artist,
+                        confidence = 1.0f,
+                        matchType = "PERFECT",
+                        displayName = "本地缓存"
+                    )
+                    appendCandidate(candidate, mutex)
+                }
                 lyricsRepository.searchLyricsIncremental(title, artist) { result ->
                     appendCandidate(
                         candidate = result.toCandidate(),
@@ -84,18 +99,28 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             _isApplying.value = true
             _errorMessage.value = null
             try {
-                // 传递候选歌词的 title 和 artist 以确保正确的元数据
-                val result = lyricsRepository.getLyrics(
-                    candidate.provider,
-                    candidate.songId,
-                    candidate.title,
-                    candidate.artist
-                )
-                if (result.isSuccess && result.lyrics != null) {
-                    // 转换为TTML格式以保留words数组(逐词同步数据)
-                    _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
+                if (candidate.provider == "cache") {
+                    // 直接读取缓存内容
+                    val cached = lyricsCacheRepository.findBySong(candidate.title, candidate.artist)
+                    if (cached != null && cached.ttmlContent.isNotBlank()) {
+                        _appliedLyricsText.value = cached.ttmlContent
+                    } else {
+                        _errorMessage.value = "缓存歌词不存在或内容为空"
+                    }
                 } else {
-                    _errorMessage.value = result.errorMessage ?: "应用候选歌词失败"
+                    // 传递候选歌词的 title 和 artist 以确保正确的元数据
+                    val result = lyricsRepository.getLyrics(
+                        candidate.provider,
+                        candidate.songId,
+                        candidate.title,
+                        candidate.artist
+                    )
+                    if (result.isSuccess && result.lyrics != null) {
+                        // 转换为TTML格式以保留words数组(逐词同步数据)
+                        _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
+                    } else {
+                        _errorMessage.value = result.errorMessage ?: "应用候选歌词失败"
+                    }
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to apply candidate")
