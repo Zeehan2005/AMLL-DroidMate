@@ -519,10 +519,78 @@ fun MainScreen() {
             ),
             modifier = Modifier.fillMaxSize()
         ) {
+            var controlsVisible by remember { mutableStateOf(true) }
+            var hideControlsJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            val scope = rememberCoroutineScope()
+            val controlsAlpha by animateFloatAsState(
+                targetValue = if (controlsVisible) 1f else 0f,
+                animationSpec = tween(durationMillis = 400),
+                label = "controlsAlpha"
+            )
+
+            // 重置隐藏计时器
+            fun resetHideTimer() {
+                hideControlsJob?.cancel()
+                controlsVisible = true
+                hideControlsJob = scope.launch {
+                    kotlinx.coroutines.delay(3000L) // 3秒后自动隐藏
+                    controlsVisible = false
+                }
+            }
+
+            // 沉浸式系统UI控制
+            val localView = LocalView.current
+            SideEffect {
+                val activity = localView.context.findActivity() ?: return@SideEffect
+                val window = activity.window
+                val insetsController = WindowCompat.getInsetsController(window, localView)
+                
+                if (controlsVisible) {
+                    // 显示控制按钮时，短暂显示系统栏
+                    insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    insetsController.systemBarsBehavior = 
+                        androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+                } else {
+                    // 隐藏控制按钮时，也隐藏系统栏
+                    insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    insetsController.systemBarsBehavior = 
+                        androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+
+            // 退出全屏时恢复系统UI
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                onDispose {
+                    val activity = localView.context.findActivity() ?: return@onDispose
+                    val window = activity.window
+                    val insetsController = WindowCompat.getInsetsController(window, localView)
+                    insetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    insetsController.systemBarsBehavior = 
+                        androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                resetHideTimer()
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.35f * fullscreenOverlayAlpha))
+                    .pointerInput(Unit) {
+                        // 使用 Final 阶段检测事件，不干扰子组件的交互
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
+                                // 检测到任何触摸事件都重置隐藏计时器
+                                if (event.changes.any { it.pressed || it.previousPressed }) {
+                                    resetHideTimer()
+                                }
+                                // 不消费事件
+                            }
+                        }
+                    }
             ) {
                 if (fullscreenLyrics != null) {
                     Card(
@@ -539,6 +607,7 @@ fun MainScreen() {
                                 Timber.i("[fullscreen] onLineSeek($seekTime)")
                                 Log.i(MAIN_SCREEN_LOG_TAG, "[fullscreen] onLineSeek($seekTime)")
                                 viewModel.seekTo(seekTime)
+                                resetHideTimer()
                             },
                             amllDebugSource = "fullscreen",
                             modifier = Modifier.fillMaxSize()
@@ -546,18 +615,189 @@ fun MainScreen() {
                     }
                 }
 
+                // 返回按钮 - 沉浸式隐藏
                 IconButton(
                     onClick = { isLyricsFullscreen = false },
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .statusBarsPadding()
-                        .padding(8.dp)
+                        .padding(top = 40.dp, start = 8.dp)
+                        .alpha(controlsAlpha)
                 ) {
                     Icon(
                         Icons.Default.ArrowBack,
                         contentDescription = "退出全屏",
-                        tint = if (useDarkSystemIcons) Color.Black else Color.White
+                        tint = Color.White.copy(alpha = 0.9f)
                     )
+                }
+
+                // 播放控制按钮 - 透明背景，底部居中
+                nowPlaying?.let { currentPlaying ->
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(bottom = 48.dp, start = 32.dp, end = 32.dp)
+                            .height(72.dp)
+                            .alpha(controlsAlpha),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        var rewindJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                        val leftInteractionSource = remember { MutableInteractionSource() }
+                        
+                        // 左侧区域 (3份) - 上一首/快退
+                        Box(
+                            modifier = Modifier
+                                .weight(3f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(50))
+                                .indication(leftInteractionSource, rememberRipple(color = Color.White))
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            val skipPreviousRewinds = AppSettings.isSkipPreviousRewindsEnabled(context)
+                                            val currentPosition = currentPlaying.currentPosition
+                                            
+                                            if (skipPreviousRewinds && currentPosition > 3000L) {
+                                                viewModel.seekTo(0L)
+                                            } else {
+                                                viewModel.skipToPrevious()
+                                            }
+                                            resetHideTimer()
+                                        },
+                                        onPress = { offset ->
+                                            val press = PressInteraction.Press(offset)
+                                            leftInteractionSource.tryEmit(press)
+                                            
+                                            val longPressTimeout = 500L
+                                            val repeatInterval = 200L
+                                            
+                                            try {
+                                                awaitPointerEventScope {
+                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    val longPressJob = scope.launch {
+                                                        delay(longPressTimeout)
+                                                        while (true) {
+                                                            viewModel.rewind()
+                                                            delay(repeatInterval)
+                                                        }
+                                                    }
+                                                    
+                                                    val up = waitForUpOrCancellation()
+                                                    longPressJob.cancel()
+                                                    
+                                                    if (up == null) {
+                                                        leftInteractionSource.tryEmit(PressInteraction.Cancel(press))
+                                                    } else {
+                                                        leftInteractionSource.tryEmit(PressInteraction.Release(press))
+                                                    }
+                                                    resetHideTimer()
+                                                }
+                                            } catch (e: Exception) {
+                                                leftInteractionSource.tryEmit(PressInteraction.Cancel(press))
+                                                rewindJob?.cancel()
+                                            }
+                                        }
+                                    )
+                                }
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.FastRewind,
+                                contentDescription = "上一首（长按快退）",
+                                modifier = Modifier.size(32.dp),
+                                tint = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                        
+                        // 中间区域 (5份) - 播放/暂停
+                        Box(
+                            modifier = Modifier
+                                .weight(5f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    if (currentPlaying.isPlaying) {
+                                        viewModel.pause()
+                                    } else {
+                                        viewModel.play()
+                                    }
+                                    resetHideTimer()
+                                }
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (currentPlaying.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (currentPlaying.isPlaying) "暂停" else "播放",
+                                modifier = Modifier.size(42.dp),
+                                tint = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                        
+                        var fastForwardJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                        val rightInteractionSource = remember { MutableInteractionSource() }
+                        
+                        // 右侧区域 (3份) - 下一首/快进
+                        Box(
+                            modifier = Modifier
+                                .weight(3f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(50))
+                                .indication(rightInteractionSource, rememberRipple(color = Color.White))
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            viewModel.skipToNext()
+                                            resetHideTimer()
+                                        },
+                                        onPress = { offset ->
+                                            val press = PressInteraction.Press(offset)
+                                            rightInteractionSource.tryEmit(press)
+                                            
+                                            val longPressTimeout = 500L
+                                            val repeatInterval = 200L
+                                            
+                                            try {
+                                                awaitPointerEventScope {
+                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    val longPressJob = scope.launch {
+                                                        delay(longPressTimeout)
+                                                        while (true) {
+                                                            viewModel.fastForward()
+                                                            delay(repeatInterval)
+                                                        }
+                                                    }
+                                                    
+                                                    val up = waitForUpOrCancellation()
+                                                    longPressJob.cancel()
+                                                    
+                                                    if (up == null) {
+                                                        rightInteractionSource.tryEmit(PressInteraction.Cancel(press))
+                                                    } else {
+                                                        rightInteractionSource.tryEmit(PressInteraction.Release(press))
+                                                    }
+                                                    resetHideTimer()
+                                                }
+                                            } catch (e: Exception) {
+                                                rightInteractionSource.tryEmit(PressInteraction.Cancel(press))
+                                                fastForwardJob?.cancel()
+                                            }
+                                        }
+                                    )
+                                }
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.FastForward,
+                                contentDescription = "下一首（长按快进）",
+                                modifier = Modifier.size(32.dp),
+                                tint = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
                 }
             }
         }
