@@ -154,7 +154,7 @@ object TTMLParser {
                 val bgStart = buffer.bgWords.firstOrNull()?.startTime ?: startTime
                 val bgEndRaw = buffer.bgWords.lastOrNull()?.endTime ?: endTime
                 val bgEnd = maxOf(bgStart, bgEndRaw)
-                timber.log.Timber.d("[BG-LYRICS-DEBUG] Creating BG line: text='$bgText' translation='${buffer.bgTranslation}' roman='${buffer.bgTransliteration}'")
+                Timber.d("[BG-LYRICS-DEBUG] Creating BG line: text='$bgText' translation='${buffer.bgTranslation}' roman='${buffer.bgTransliteration}'")
                 LyricLine(
                     startTime = bgStart,
                     endTime = bgEnd,
@@ -210,12 +210,12 @@ object TTMLParser {
                             if (text.isNotEmpty()) {
                                 if (inBackground) {
                                     buffer.bgTranslation = text
-                                    timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG translation: $text")
+                                    Timber.d("[BG-LYRICS-DEBUG] Collected BG translation: $text")
                                 } else {
                                     // 兼容部分 TTML：x-bg 与 x-translation 平级时，将翻译归属到背景行。
                                     if (buffer.mainWords.isEmpty() && buffer.bgWords.isNotEmpty()) {
                                         buffer.bgTranslation = text
-                                        timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG translation (fallback outside x-bg): $text")
+                                        Timber.d("[BG-LYRICS-DEBUG] Collected BG translation (fallback outside x-bg): $text")
                                     } else {
                                         buffer.translation = text
                                     }
@@ -228,12 +228,12 @@ object TTMLParser {
                             if (text.isNotEmpty()) {
                                 if (inBackground) {
                                     buffer.bgTransliteration = text
-                                    timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration: $text")
+                                    Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration: $text")
                                 } else {
                                     // 兼容部分 TTML：x-bg 与 x-roman 平级时，将音译归属到背景行。
                                     if (buffer.mainWords.isEmpty() && buffer.bgWords.isNotEmpty()) {
                                         buffer.bgTransliteration = text
-                                        timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration (fallback outside x-bg): $text")
+                                        Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration (fallback outside x-bg): $text")
                                     } else {
                                         buffer.transliteration = text
                                     }

@@ -29,7 +29,7 @@ object YrcParser {
 
             if (yrcLineTimestampRegex.containsMatchIn(line)) {
                 try {
-                    parseYrcLine(line, lineNum)?.let {
+                    parseYrcLine(line)?.let {
                         lines.add(it)
                         if (lines.size <= 3) {
                             Timber.d("YrcParser: parsed line $lineNum - ${it.text.take(30)}")
@@ -79,7 +79,7 @@ object YrcParser {
         }
     }
 
-    private fun parseYrcLine(line: String, lineNum: Int): LyricLine? {
+    private fun parseYrcLine(line: String): LyricLine? {
         val lineTs = yrcLineTimestampRegex.find(line) ?: return null
         val lineStart = lineTs.groups["start"]?.value?.toLongOrNull() ?: return null
         val lineDuration = lineTs.groups["duration"]?.value?.toLongOrNull() ?: return null

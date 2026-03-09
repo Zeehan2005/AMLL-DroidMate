@@ -36,6 +36,7 @@ class LyricNotificationManager(private val context: Context) {
             .setContentText(safeLine)
             .setStyle(NotificationCompat.BigTextStyle().bigText(safeLine))
             .setContentIntent(contentIntent)
+            .setDeleteIntent(createDeleteIntent())                 // 监听用户滑动取消
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)        // 提升优先级以确保锁屏显示
@@ -70,6 +71,19 @@ class LyricNotificationManager(private val context: Context) {
 
     fun cancel() {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    }
+
+    /**
+     * Create an intent that will be fired when the user explicitly dismisses
+     * the lyric notification (swipe away / clear all). The ViewModel registers
+     * a broadcast receiver to catch this and remember that the user doesn't
+     * want updates while paused.
+     */
+    private fun createDeleteIntent(): PendingIntent {
+        val intent = Intent(ACTION_LYRIC_NOTIFICATION_DISMISSED)
+        // broadcast to the app; use immutable flag for safety
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getBroadcast(context, REQUEST_CODE_DELETE, intent, flags)
     }
 
     private fun hasNotificationPermission(): Boolean {
@@ -114,8 +128,12 @@ class LyricNotificationManager(private val context: Context) {
     }
 
     companion object {
+        const val ACTION_LYRIC_NOTIFICATION_DISMISSED =
+            "com.amll.droidmate.ACTION_LYRIC_NOTIFICATION_DISMISSED"
+
         private const val CHANNEL_ID = "lyric_live_channel"
         private const val NOTIFICATION_ID = 20021
         private const val REQUEST_CODE_OPEN_APP = 9001
+        private const val REQUEST_CODE_DELETE = 9002
     }
 }

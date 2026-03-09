@@ -91,4 +91,41 @@ class MainViewModelTest {
         viewModel.updateLyricNotification(null, playing)
         assertEquals(3, fakeManager.canceledTimes)
     }
+
+    @Test
+    fun clearedWhilePausedPreventsSubsequentUpdates() {
+        val lyrics = sampleLyrics()
+        val paused = NowPlayingMusic(
+            title = "t", artist = "a", currentPosition = 500, isPlaying = false
+        )
+
+        // initial show in paused state
+        viewModel.updateLyricNotification(lyrics, paused)
+        assertEquals(1, fakeManager.shownTimes)
+        assertFalse(fakeManager.lastOngoing == true)
+
+        // on first pause we get a non-ongoing notification
+        // (user swipe doesn't matter for suppression now)
+
+        // update again while still paused; should NOT produce a second notification
+        viewModel.updateLyricNotification(lyrics, paused)
+        assertEquals(1, fakeManager.shownTimes)
+
+        // simulate swipe; shouldn't enable further updates, only cancel
+        viewModel.onNotificationDeletedByUser()
+        assertEquals(1, fakeManager.canceledTimes)
+        viewModel.updateLyricNotification(lyrics, paused)
+        assertEquals(1, fakeManager.shownTimes)
+
+        // if lyrics change even while paused we should still suppress
+        val modified = lyrics.copy(lines = lyrics.lines + LyricLine(2000,3000,"third"))
+        viewModel.updateLyricNotification(modified, paused)
+        assertEquals(1, fakeManager.shownTimes) // no new notification
+
+        // resume playback - flag should clear and update should reappear
+        val playing = paused.copy(isPlaying = true)
+        viewModel.updateLyricNotification(lyrics, playing)
+        assertEquals(2, fakeManager.shownTimes)
+        assertTrue(fakeManager.lastOngoing == true)
+    }
 }

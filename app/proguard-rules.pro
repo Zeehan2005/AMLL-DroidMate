@@ -4,11 +4,15 @@
 -dontobfuscate
 -optimizationpasses 5
 
-# Keep our application classes
--keep class com.amll.droidmate.** { *; }
+# Keep our application entry points and data models.  Avoid overly broad rules affecting 100+ classes.
+-keep class com.amll.droidmate.MainActivity { *; }
+-keep class com.amll.droidmate.service.** { *; }
+-keep class com.amll.droidmate.ui.screens.** { *; }
+-keep class com.amll.droidmate.domain.model.** { *; }
+# (remove blanket package rule to let shrinker trim unused classes)
 
-# Keep Jetpack Compose
--keep class androidx.** { *; }
+# Keep Jetpack Compose (previous rule matched no members in lint analysis; remove or narrow if needed)
+#-keep class androidx.** { *; }
 
 # Keep Kotlin
 -keepclassmembers class kotlin.Metadata {
@@ -16,19 +20,20 @@
     *** values();
 }
 
-# Keep serialization
--keep class kotlinx.serialization.** { *; }
--keep class **$$serializer { *; }
+# Keep serialization (allow shrinking so rule doesn't count as overly broad)
+-keep,allowshrinking class kotlinx.serialization.** { *; }
+-keep,allowshrinking class **$$serializer { *; }
 -keepclassmembers class **$Companion {
     *** INSTANCE;
 }
 
-# Keep Ktor
--keep class io.ktor.** { *; }
+# Keep Ktor (allow shrinking)
+-keep,allowshrinking class io.ktor.** { *; }
 
 # Keep OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+# (no keep rule; allow shrinker to remove unused okhttp classes)
 
 # Keep Timber
 -keep class timber.** { *; }

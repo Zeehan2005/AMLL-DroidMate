@@ -60,7 +60,7 @@ object KrcParser {
             if (isMetadataLine(trimmed)) continue
             
             try {
-                parseSingleLine(trimmed, index)?.let { parsedLine ->
+                parseSingleLine(trimmed)?.let { parsedLine ->
                     val translation = auxiliaryData.translations.getOrNull(auxLineIndex)
                         ?.takeIf { it.isNotBlank() }
                     val romanization = auxiliaryData.romanizations.getOrNull(auxLineIndex)
@@ -129,7 +129,7 @@ object KrcParser {
     /**
      * 解析单行 KRC 歌词
      */
-    private fun parseSingleLine(line: String, lineNumber: Int): LyricLine? {
+    private fun parseSingleLine(line: String): LyricLine? {
         // 匹配行时间戳
         val lineMatch = LINE_TIMESTAMP_REGEX.find(line) ?: return null
         val lineStartMs = lineMatch.groupValues[1].toLongOrNull() ?: return null

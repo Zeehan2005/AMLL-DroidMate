@@ -90,7 +90,6 @@ object EnhancedLrcParser {
     ): LyricLine {
         val words = mutableListOf<LyricWord>()
         var fullText = ""
-        var lastEndTime = lineStartMs
         
         for (match in WORD_TIMESTAMP_REGEX.findAll(content)) {
             val wordStartMs = parseTimeToMillis(
@@ -111,7 +110,6 @@ object EnhancedLrcParser {
                 )
             )
             fullText += text
-            lastEndTime = wordStartMs
         }
         
         // 更新每个词的结束时间

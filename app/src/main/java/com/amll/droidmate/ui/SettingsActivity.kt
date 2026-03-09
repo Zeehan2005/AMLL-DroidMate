@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+
+// suppress icon deprecation where used
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -121,6 +123,7 @@ private fun SettingsPage(
             title = { Text("设置") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
+                    @Suppress("DEPRECATION")
                     Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                 }
             }
@@ -476,7 +479,7 @@ private fun CardClickActionOption(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    androidx.compose.foundation.layout.Row(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .selectable(

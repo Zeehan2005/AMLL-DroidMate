@@ -1,5 +1,6 @@
 package com.amll.droidmate.data.network
 
+import timber.log.Timber
 import java.io.ByteArrayInputStream
 import java.util.Locale
 import java.util.zip.InflaterInputStream
@@ -15,11 +16,11 @@ object QqMusicQrcCrypto {
     private val codec = QqMusicCodec()
 
     fun decryptQrcHex(encryptedText: String): String {
-        android.util.Log.d("QqMusicQrcCrypto", "Starting Hex+3DES+Zlib decryption, input length: ${encryptedText.length}")
-        android.util.Log.d("QqMusicQrcCrypto", "Input preview (first 200 chars): ${encryptedText.take(200)}")
+        Timber.tag("QqMusicQrcCrypto").d("Starting Hex+3DES+Zlib decryption, input length: ${encryptedText.length}")
+        Timber.tag("QqMusicQrcCrypto").d("Input preview (first 200 chars): ${encryptedText.take(200)}")
         
         val encryptedBytes = decodeHex(encryptedText)
-        android.util.Log.d("QqMusicQrcCrypto", "After Hex decode: ${encryptedBytes.size} bytes")
+        Timber.tag("QqMusicQrcCrypto").d("After Hex decode: ${encryptedBytes.size} bytes")
         
         require(encryptedBytes.size % DES_BLOCK_SIZE == 0) {
             "Encrypted data length must be a multiple of $DES_BLOCK_SIZE"
@@ -32,12 +33,12 @@ object QqMusicQrcCrypto {
             offset += DES_BLOCK_SIZE
         }
         
-        android.util.Log.d("QqMusicQrcCrypto", "After 3DES decrypt: ${decrypted.size} bytes, first 32 bytes: ${decrypted.take(32).joinToString(",") { "%02X".format(it) }}")
-        android.util.Log.w("QqMusicQrcCrypto", "WARNING: Valid Zlib data should start with 0x78 (120), but first byte is: 0x${"%02X".format(decrypted[0])} (${decrypted[0].toInt() and 0xFF})")
+        Timber.tag("QqMusicQrcCrypto").d("After 3DES decrypt: ${decrypted.size} bytes, first 32 bytes: ${decrypted.take(32).joinToString(",") { "%02X".format(it) }}")
+        Timber.tag("QqMusicQrcCrypto").w("WARNING: Valid Zlib data should start with 0x78 (120), but first byte is: 0x${"%02X".format(decrypted[0])} (${decrypted[0].toInt() and 0xFF})")
 
         val decompressed = decompress(decrypted)
-        android.util.Log.d("QqMusicQrcCrypto", "After Zlib decompress: ${decompressed.size} bytes")
-        android.util.Log.d("QqMusicQrcCrypto", "Decompressed preview (first 200 chars): ${String(decompressed.take(200).toByteArray(), Charsets.UTF_8)}")
+        Timber.tag("QqMusicQrcCrypto").d("After Zlib decompress: ${decompressed.size} bytes")
+        Timber.tag("QqMusicQrcCrypto").d("Decompressed preview (first 200 chars): ${String(decompressed.take(200).toByteArray(), Charsets.UTF_8)}")
         
         val payload = if (
             decompressed.size >= 3 &&
@@ -45,14 +46,14 @@ object QqMusicQrcCrypto {
             decompressed[1] == 0xBB.toByte() &&
             decompressed[2] == 0xBF.toByte()
         ) {
-            android.util.Log.d("QqMusicQrcCrypto", "UTF-8 BOM detected, removing first 3 bytes")
+            Timber.tag("QqMusicQrcCrypto").d("UTF-8 BOM detected, removing first 3 bytes")
             decompressed.copyOfRange(3, decompressed.size)
         } else {
             decompressed
         }
 
         val result = payload.toString(Charsets.UTF_8)
-        android.util.Log.d("QqMusicQrcCrypto", "Final result length: ${result.length}, preview (first 300 chars): ${result.take(300)}")
+        Timber.tag("QqMusicQrcCrypto").d("Final result length: ${result.length}, preview (first 300 chars): ${result.take(300)}")
         return result
     }
 

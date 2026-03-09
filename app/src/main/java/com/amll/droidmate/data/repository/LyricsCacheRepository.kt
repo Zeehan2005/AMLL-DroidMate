@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class LyricsCacheRepository(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs = com.amll.droidmate.util.PreferenceHelper(context, PREFS_NAME)
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -86,7 +86,7 @@ class LyricsCacheRepository(context: Context) {
     }
 
     fun clearAll() {
-        prefs.edit().remove(KEY_CACHE_JSON).apply()
+        prefs.remove(KEY_CACHE_JSON)
     }
 
     private fun readAll(): List<CachedLyricEntry> {
@@ -99,7 +99,7 @@ class LyricsCacheRepository(context: Context) {
     }
 
     private fun writeAll(entries: List<CachedLyricEntry>) {
-        prefs.edit().putString(KEY_CACHE_JSON, json.encodeToString(entries)).apply()
+        prefs.putString(KEY_CACHE_JSON, json.encodeToString(entries))
     }
 
     private fun normalize(value: String): String {

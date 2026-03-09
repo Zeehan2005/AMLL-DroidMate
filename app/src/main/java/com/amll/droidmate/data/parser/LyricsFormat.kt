@@ -27,6 +27,7 @@ enum class LyricsFormat(val extension: String, val displayName: String) {
     PLAIN_TEXT("txt", "Plain Text");
 
     companion object {
+        @Suppress("unused")
         /**
          * 根据文件扩展名或内容特征检测格式
          */

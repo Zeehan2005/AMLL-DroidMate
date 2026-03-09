@@ -1,3 +1,5 @@
+@file:Suppress("UNUSED_VARIABLE")
+
 package com.amll.droidmate.ui.screens
 
 import android.app.Activity
@@ -6,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ContextWrapper
 import android.net.Uri
-import android.util.Log
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -200,7 +201,7 @@ fun MainScreen() {
     LaunchedEffect(Unit) {
         while (true) {
             notificationAccessGranted = isNotificationAccessGranted(context)
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
         }
     }
 
@@ -237,8 +238,7 @@ fun MainScreen() {
     }
 
     LaunchedEffect(webViewReloadKey) {
-        Timber.i("[reload] webViewReloadKey changed -> $webViewReloadKey")
-        Log.i(MAIN_SCREEN_LOG_TAG, "[reload] webViewReloadKey changed -> $webViewReloadKey")
+        Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] webViewReloadKey changed -> $webViewReloadKey")
     }
 
     Box(
@@ -276,6 +276,7 @@ fun MainScreen() {
                         ) {
                             DropdownMenuItem(
                                 leadingIcon = {
+                                    @Suppress("DEPRECATION")
                                     Icon(Icons.Default.TextSnippet, contentDescription = null)
                                 },
                                 text = { Text("自选歌词") },
@@ -294,11 +295,9 @@ fun MainScreen() {
                                 },
                                 text = { Text("刷新") },
                                 onClick = {
-                                    Timber.i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
-                                    Log.i(MAIN_SCREEN_LOG_TAG, "[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
+                                    Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
                                     webViewReloadKey += 1
-                                    Timber.i("[reload] Refresh handled, newKey=$webViewReloadKey")
-                                    Log.i(MAIN_SCREEN_LOG_TAG, "[reload] Refresh handled, newKey=$webViewReloadKey")
+                                    Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh handled, newKey=$webViewReloadKey")
                                     showMenu = false
                                 }
                             )
@@ -424,8 +423,7 @@ fun MainScreen() {
                             currentTime = currentTime,
                             webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
-                                Timber.i("[embedded] onLineSeek($seekTime)")
-                                Log.i(MAIN_SCREEN_LOG_TAG, "[embedded] onLineSeek($seekTime)")
+                                Timber.tag(MAIN_SCREEN_LOG_TAG).i("[embedded] onLineSeek($seekTime)")
                                 viewModel.seekTo(seekTime)
                             },
                             onFullscreenTap = { isLyricsFullscreen = true },
@@ -524,7 +522,7 @@ fun MainScreen() {
             modifier = Modifier.fillMaxSize()
         ) {
             var controlsVisible by remember { mutableStateOf(true) }
-            var hideControlsJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            var hideControlsJob by remember { mutableStateOf<Job?>(null) }
             val scope = rememberCoroutineScope()
             val controlsAlpha by animateFloatAsState(
                 targetValue = if (controlsVisible) 1f else 0f,
@@ -537,7 +535,7 @@ fun MainScreen() {
                 hideControlsJob?.cancel()
                 controlsVisible = true
                 hideControlsJob = scope.launch {
-                    kotlinx.coroutines.delay(3000L) // 3秒后自动隐藏
+                    delay(3000L) // 3秒后自动隐藏
                     controlsVisible = false
                 }
             }
@@ -631,8 +629,7 @@ fun MainScreen() {
                             currentTime = currentTime,
                             webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
-                                Timber.i("[fullscreen] onLineSeek($seekTime)")
-                                Log.i(MAIN_SCREEN_LOG_TAG, "[fullscreen] onLineSeek($seekTime)")
+                                Timber.tag(MAIN_SCREEN_LOG_TAG).i("[fullscreen] onLineSeek($seekTime)")
                                 viewModel.seekTo(seekTime)
                                 resetHideTimer()
                             },
@@ -651,6 +648,7 @@ fun MainScreen() {
                         .alpha(controlsAlpha)
                 ) {
                     Icon(
+                        @Suppress("DEPRECATION")
                         Icons.Default.ArrowBack,
                         contentDescription = "退出全屏",
                         tint = Color.White.copy(alpha = 0.9f)
@@ -669,7 +667,7 @@ fun MainScreen() {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        var rewindJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                        var rewindJob by remember { mutableStateOf<Job?>(null) }
                         val leftInteractionSource = remember { MutableInteractionSource() }
                         
                         // 左侧区域 (3份) - 上一首/快退
@@ -701,7 +699,7 @@ fun MainScreen() {
                                             
                                             try {
                                                 awaitPointerEventScope {
-                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    val _down = awaitFirstDown(requireUnconsumed = false)
                                                     val longPressJob = scope.launch {
                                                         delay(longPressTimeout)
                                                         while (true) {
@@ -763,7 +761,7 @@ fun MainScreen() {
                             )
                         }
                         
-                        var fastForwardJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                        var fastForwardJob by remember { mutableStateOf<Job?>(null) }
                         val rightInteractionSource = remember { MutableInteractionSource() }
                         
                         // 右侧区域 (3份) - 下一首/快进
@@ -788,7 +786,7 @@ fun MainScreen() {
                                             
                                             try {
                                                 awaitPointerEventScope {
-                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    val _down = awaitFirstDown(requireUnconsumed = false)
                                                     val longPressJob = scope.launch {
                                                         delay(longPressTimeout)
                                                         while (true) {
@@ -860,8 +858,7 @@ private fun LyricsVisualLayer(
     modifier: Modifier = Modifier
 ) {
     LaunchedEffect(webViewReloadKey, amllDebugSource) {
-        Timber.i("[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
-        Log.i(MAIN_SCREEN_LOG_TAG, "[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
+        Timber.tag(MAIN_SCREEN_LOG_TAG).i("[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
     }
 
     Box(
@@ -1142,7 +1139,7 @@ fun NowPlayingCard(
                                         
                                         try {
                                             awaitPointerEventScope {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                val _down = awaitFirstDown(requireUnconsumed = false)
                                                 val longPressJob = scope.launch {
                                                     delay(longPressTimeout)
                                                     // 长按开始，持续触发
@@ -1218,7 +1215,7 @@ fun NowPlayingCard(
                                         
                                         try {
                                             awaitPointerEventScope {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                val _down = awaitFirstDown(requireUnconsumed = false)
                                                 val longPressJob = scope.launch {
                                                     delay(longPressTimeout)
                                                     // 长按开始，持续触发

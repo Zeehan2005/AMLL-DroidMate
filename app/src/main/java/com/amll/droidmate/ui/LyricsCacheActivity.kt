@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+
+// suppress icon deprecation where used
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -101,6 +103,7 @@ private fun LyricsCachePage(
             title = { Text("管理缓存歌词") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
+                    @Suppress("DEPRECATION")
                     Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                 }
             },

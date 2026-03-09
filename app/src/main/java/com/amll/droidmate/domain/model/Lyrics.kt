@@ -1,3 +1,4 @@
+@file:OptIn(kotlinx.serialization.InternalSerializationApi::class)
 package com.amll.droidmate.domain.model
 
 import kotlinx.serialization.Serializable

@@ -8,6 +8,7 @@ import timber.log.Timber
 /**
  * TTML 转换器 - 将歌词转换为 TTML 格式
  */
+@Suppress("unused")
 object TTMLConverter {
 
     /**
@@ -63,10 +64,10 @@ object TTMLConverter {
         sb.append("""${indent}<body dur="$duration">$lineBreak""")
         
         // Lyrics lines
-        lyrics.lines.forEachIndexed { index, line ->
+        lyrics.lines.forEachIndexed outer@{ lineIndex, line ->
             val begin = formatTime(line.startTime)
             val end = formatTime(line.endTime)
-            val lineNum = "L${index + 1}"
+            val lineNum = "L${lineIndex + 1}"
             val agentAttr = line.agent?.let { " ttm:agent=\"$it\"" } ?: ""
             
             sb.append("""${indent}${indent}<p begin="$begin" end="$end" itunes:key="$lineNum"$agentAttr>""")
@@ -91,7 +92,7 @@ object TTMLConverter {
             if (line.words.isNotEmpty()) {
                 // 警示后人：<p>/<span> 内空格是可见歌词语义，不能对词文本做 trim。
                 // 这里最多仅清理换行控制字符，避免导出后把 "a b" 变成 "ab"。
-                line.words.forEachIndexed { index, word ->
+                line.words.forEachIndexed inner@{ wordIndex, word ->
                     val wordBegin = formatTime(word.startTime)
                     val wordEnd = formatTime(word.endTime)
 
@@ -101,10 +102,10 @@ object TTMLConverter {
 
                     if (spanText.isEmpty()) {
                         // 保留空白词节点的最小分隔语义，避免词间被完全粘连。
-                        if (!formatted && index < line.words.lastIndex) {
+                        if (!formatted && wordIndex < line.words.lastIndex) {
                             sb.append(" ")
                         }
-                        return@forEachIndexed
+                        return@inner
                     }
 
                     sb.append("""$spanIndent<span begin="$wordBegin" end="$wordEnd">${escapeXML(spanText)}</span>""")

@@ -1,8 +1,9 @@
+@file:OptIn(kotlinx.serialization.InternalSerializationApi::class)
 package com.amll.droidmate.update
 
 import android.content.Context
 import com.amll.droidmate.ui.UpdateChannel
-import com.amll.droidmate.data.network.HttpClientFactory
+import com.amll.droidmate.di.ServiceLocator
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -77,7 +78,7 @@ object GitHubUpdateChecker {
         val currentVersionName = getCurrentVersionName(context)
         val installed = parseInstalledVersion(currentVersionName)
 
-        val client = HttpClientFactory.create(context)
+        val client = ServiceLocator.provideHttpClient(context)
         return try {
             val releases = client.get(RELEASES_API) {
                 header(HttpHeaders.Accept, "application/vnd.github+json")

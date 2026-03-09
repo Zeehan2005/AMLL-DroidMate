@@ -7,6 +7,7 @@ import timber.log.Timber
  * 酷狗音乐签名工具
  * 参考: https://github.com/apoint123/unilyric/tree/main/lyrics_helper_rs/src/providers/kugou
  */
+@Suppress("unused")
 object KugouSignature {
     
     // 常量（对应 Unilyric 的配置）

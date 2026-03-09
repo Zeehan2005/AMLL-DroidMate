@@ -3,6 +3,7 @@ package com.amll.droidmate.ui
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import com.amll.droidmate.util.PreferenceHelper
 
 enum class CardClickAction(val value: String) {
     DIRECT_OPEN("direct_open"),
@@ -42,6 +43,10 @@ object AppSettings {
     private const val KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at"
     private const val KEY_SKIP_PREVIOUS_REWINDS = "skip_previous_rewinds"
 
+    // helper to avoid repeating getSharedPreferences
+    private fun prefs(context: Context) =
+        PreferenceHelper(context, PREFS_NAME)
+
     private const val DEFAULT_AMLL_FONT_FAMILY = "\"SF Pro Display\", \"PingFang SC\", system-ui, -apple-system, \"Segoe UI\", sans-serif"
 
     data class AmllFontFile(
@@ -54,35 +59,29 @@ object AppSettings {
     fun getDefaultAmllFontFamily(): String = DEFAULT_AMLL_FONT_FAMILY
 
     fun getCardClickAction(context: Context): CardClickAction {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val value = prefs.getString(KEY_CARD_CLICK_ACTION, CardClickAction.ASK.value)
+        val value = prefs(context).getString(KEY_CARD_CLICK_ACTION, CardClickAction.ASK.value)
         return CardClickAction.fromValue(value)
     }
 
     fun setCardClickAction(context: Context, action: CardClickAction) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_CARD_CLICK_ACTION, action.value).apply()
+        prefs(context).putString(KEY_CARD_CLICK_ACTION, action.value)
     }
 
     fun isLyricNotificationEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(KEY_LYRIC_NOTIFICATION_ENABLED, false)
+        return prefs(context).getBoolean(KEY_LYRIC_NOTIFICATION_ENABLED, false)
     }
 
     fun setLyricNotificationEnabled(context: Context, enabled: Boolean) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_LYRIC_NOTIFICATION_ENABLED, enabled).apply()
+        prefs(context).putBoolean(KEY_LYRIC_NOTIFICATION_ENABLED, enabled)
     }
 
     fun getAmllFontFamily(context: Context): String {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_AMLL_FONT_FAMILY, DEFAULT_AMLL_FONT_FAMILY)
+        return prefs(context).getString(KEY_AMLL_FONT_FAMILY, DEFAULT_AMLL_FONT_FAMILY)
             ?: DEFAULT_AMLL_FONT_FAMILY
     }
 
     fun setAmllFontFamily(context: Context, fontFamily: String) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_AMLL_FONT_FAMILY, fontFamily).apply()
+        prefs(context).putString(KEY_AMLL_FONT_FAMILY, fontFamily)
     }
 
     fun getAmllFontFilePath(context: Context): String? {
@@ -106,21 +105,20 @@ object AppSettings {
     }
 
     fun clearAmllFontFile(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .remove(KEY_AMLL_ACTIVE_FONT_ID)
-            .remove(KEY_AMLL_ENABLED_FONT_IDS)
-            .remove(KEY_AMLL_FONT_FILE_PATH)
-            .remove(KEY_AMLL_FONT_FILE_NAME)
-            .apply()
+        prefs(context).edit {
+            remove(KEY_AMLL_ACTIVE_FONT_ID)
+            remove(KEY_AMLL_ENABLED_FONT_IDS)
+            remove(KEY_AMLL_FONT_FILE_PATH)
+            remove(KEY_AMLL_FONT_FILE_NAME)
+        }
     }
 
     fun getAmllFontFiles(context: Context): List<AmllFontFile> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val raw = prefs.getString(KEY_AMLL_FONT_FILES, null)
+        val helper = prefs(context)
+        val raw = helper.getString(KEY_AMLL_FONT_FILES, null)
         if (raw.isNullOrBlank()) {
-            val legacyPath = prefs.getString(KEY_AMLL_FONT_FILE_PATH, null)
-            val legacyName = prefs.getString(KEY_AMLL_FONT_FILE_NAME, null)
+            val legacyPath = helper.getString(KEY_AMLL_FONT_FILE_PATH, null)
+            val legacyName = helper.getString(KEY_AMLL_FONT_FILE_NAME, null)
             if (!legacyPath.isNullOrBlank()) {
                 val fallbackName = legacyName ?: "Imported Font"
                 return listOf(
@@ -218,28 +216,26 @@ object AppSettings {
     }
 
     fun getActiveAmllFontFileId(context: Context): String? {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val activeId = prefs.getString(KEY_AMLL_ACTIVE_FONT_ID, null)
+        val helper = prefs(context)
+        val activeId = helper.getString(KEY_AMLL_ACTIVE_FONT_ID, null)
         if (!activeId.isNullOrBlank()) return activeId
 
-        val legacyPath = prefs.getString(KEY_AMLL_FONT_FILE_PATH, null)
+        val legacyPath = helper.getString(KEY_AMLL_FONT_FILE_PATH, null)
         return legacyPath?.takeIf { it.isNotBlank() }?.let(::stableFontId)
     }
 
     fun setActiveAmllFontFileId(context: Context, fileId: String?) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            if (fileId.isNullOrBlank()) {
-                remove(KEY_AMLL_ACTIVE_FONT_ID)
-            } else {
-                putString(KEY_AMLL_ACTIVE_FONT_ID, fileId)
-            }
-        }.apply()
+        val helper = prefs(context)
+        if (fileId.isNullOrBlank()) {
+            helper.remove(KEY_AMLL_ACTIVE_FONT_ID)
+        } else {
+            helper.putString(KEY_AMLL_ACTIVE_FONT_ID, fileId)
+        }
     }
 
     fun getEnabledAmllFontFileIds(context: Context): List<String> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val raw = prefs.getString(KEY_AMLL_ENABLED_FONT_IDS, null)
+        val helper = prefs(context)
+        val raw = helper.getString(KEY_AMLL_ENABLED_FONT_IDS, null)
         if (raw.isNullOrBlank()) {
             val legacyActive = getActiveAmllFontFileId(context)
             return if (legacyActive.isNullOrBlank()) emptyList() else listOf(legacyActive)
@@ -260,11 +256,10 @@ object AppSettings {
 
     fun setEnabledAmllFontFileIds(context: Context, fileIds: List<String>) {
         val normalized = fileIds.filter { it.isNotBlank() }.distinct()
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val json = JSONArray().apply {
             normalized.forEach { put(it) }
         }
-        prefs.edit().putString(KEY_AMLL_ENABLED_FONT_IDS, json.toString()).apply()
+        prefs(context).putString(KEY_AMLL_ENABLED_FONT_IDS, json.toString())
     }
 
     fun getActiveAmllFontFile(context: Context): AmllFontFile? {
@@ -293,43 +288,35 @@ object AppSettings {
     }
 
     fun isAutoUpdateCheckEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(KEY_AUTO_UPDATE_CHECK_ENABLED, true)
+        return prefs(context).getBoolean(KEY_AUTO_UPDATE_CHECK_ENABLED, true)
     }
 
     fun setAutoUpdateCheckEnabled(context: Context, enabled: Boolean) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_AUTO_UPDATE_CHECK_ENABLED, enabled).apply()
+        prefs(context).putBoolean(KEY_AUTO_UPDATE_CHECK_ENABLED, enabled)
     }
 
     fun getUpdateChannel(context: Context): UpdateChannel {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val value = prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.value)
+        val value = prefs(context).getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.value)
         return UpdateChannel.fromValue(value)
     }
 
     fun setUpdateChannel(context: Context, channel: UpdateChannel) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_UPDATE_CHANNEL, channel.value).apply()
+        prefs(context).putString(KEY_UPDATE_CHANNEL, channel.value)
     }
 
     fun getLastUpdateCheckAt(context: Context): Long {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
+        return prefs(context).getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
     }
 
     fun setLastUpdateCheckAt(context: Context, timestampMillis: Long) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, timestampMillis).apply()
+        prefs(context).putLong(KEY_LAST_UPDATE_CHECK_AT, timestampMillis)
     }
 
     fun isSkipPreviousRewindsEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(KEY_SKIP_PREVIOUS_REWINDS, false)
+        return prefs(context).getBoolean(KEY_SKIP_PREVIOUS_REWINDS, false)
     }
 
     fun setSkipPreviousRewindsEnabled(context: Context, enabled: Boolean) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_SKIP_PREVIOUS_REWINDS, enabled).apply()
+        prefs(context).putBoolean(KEY_SKIP_PREVIOUS_REWINDS, enabled)
     }
 }

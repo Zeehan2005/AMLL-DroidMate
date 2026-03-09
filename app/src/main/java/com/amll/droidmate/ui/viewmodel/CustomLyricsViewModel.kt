@@ -7,8 +7,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amll.droidmate.data.converter.TTMLConverter
-import com.amll.droidmate.data.network.HttpClientFactory
 import com.amll.droidmate.data.repository.LyricsRepository
+import com.amll.droidmate.di.ServiceLocator
 import com.amll.droidmate.domain.model.LyricsSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,11 +42,10 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         "qqmusic" to 3
     )
 
-    // HTTP Client（使用统一配置，缓存存储在 cache 目录）
-    private val httpClient = HttpClientFactory.create(application.applicationContext)
-
-    private val lyricsRepository = LyricsRepository(httpClient)
-    private val lyricsCacheRepository = com.amll.droidmate.data.repository.LyricsCacheRepository(application.applicationContext)
+    // HTTP client & repositories from ServiceLocator (can be overridden in tests)
+    private val httpClient = ServiceLocator.provideHttpClient(application.applicationContext)
+    private val lyricsRepository = ServiceLocator.provideLyricsRepository(application.applicationContext)
+    private val lyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application.applicationContext)
 
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates

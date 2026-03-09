@@ -5,9 +5,9 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amll.droidmate.data.converter.TTMLConverter
-import com.amll.droidmate.data.network.HttpClientFactory
 import com.amll.droidmate.data.repository.LyricsCacheRepository
 import com.amll.droidmate.data.repository.LyricsRepository
+import com.amll.droidmate.di.ServiceLocator
 import com.amll.droidmate.domain.model.NowPlayingMusic
 import com.amll.droidmate.domain.model.TTMLLyrics
 import com.amll.droidmate.service.LyricNotificationManager
@@ -26,12 +26,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private val context: Context = application.applicationContext
 
-    // HTTP Client（使用统一配置，缓存存储在 cache 目录）
-    private val httpClient = HttpClientFactory.create(context)
-    
-    // 仓库
-    private val lyricsRepository = LyricsRepository(httpClient)
-    private val lyricsCacheRepository = LyricsCacheRepository(context)
+    // HTTP Client & 仓库（由 ServiceLocator 提供以便集中管理）
+    private val httpClient = ServiceLocator.provideHttpClient(context)
+    private val lyricsRepository = ServiceLocator.provideLyricsRepository(context)
+    private val lyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(context)
     
     // 服务
     private val mediaInfoService = MediaInfoService(context)
@@ -59,10 +57,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
     
+    // tracks whether we've already shown the paused notification. After a
+    // pause occurs we'll send one update with ongoing=false, then refrain from
+    // sending additional updates until playback resumes.  This ignores whether
+    // the user actually swipes it away.
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal var pausedNotificationSent: Boolean = false
+
+    private val deleteReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == LyricNotificationManager.ACTION_LYRIC_NOTIFICATION_DISMISSED) {
+                Timber.d("Lyric notification deleted by user, cancelling")
+                lyricNotificationManager.cancel()
+            }
+        }
+    }
+
     init {
         setupMediaListener()
         observeLyricNotification()
         Timber.plant(Timber.DebugTree())
+
+        // listen for user dismissals. Android 13+ requires an explicit export flag
+        // when registering receivers that aren't for system broadcasts.
+        context.registerReceiver(
+            deleteReceiver,
+            android.content.IntentFilter(LyricNotificationManager.ACTION_LYRIC_NOTIFICATION_DISMISSED),
+            Context.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    /**
+     * Called when the lyric notification is explicitly removed by the user (swipe
+     * away or clear all).  Extracted to a method so tests can simulate the
+     * behaviour without needing to construct an Intent.
+     */
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal fun onNotificationDeletedByUser() {
+        Timber.d("Lyric notification deleted by user (test helper)")
+        lyricNotificationManager.cancel()
     }
 
     private fun observeLyricNotification() {
@@ -82,30 +115,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // when playback is paused we should *not* completely remove the
-        // notification; instead convert it into a dismissable one so the user can
-        // swipe it away or press "clear all".
-        if (music == null) {
+        // if we have no music or no lyrics, just clear
+        if (music == null || lyrics == null) {
             lyricNotificationManager.cancel()
             return
         }
 
-        if (lyrics == null) {
-            lyricNotificationManager.cancel()
-            return
-        }
-
+        // compute current line first, since we'll need it in both branches
         val time = music.currentPosition
         val currentLine = lyrics.lines.firstOrNull { time in it.startTime..it.endTime }
             ?: lyrics.lines.lastOrNull { it.startTime <= time }
 
-        // ongoing only when actively playing
-        lyricNotificationManager.showOrUpdate(currentLine, ongoing = music.isPlaying)
+        if (!music.isPlaying) {
+            // paused state: send only one update with ongoing=false
+            if (!pausedNotificationSent) {
+                lyricNotificationManager.showOrUpdate(currentLine, ongoing = false)
+                pausedNotificationSent = true
+            }
+            return
+        }
+
+        // playback resumed – clear flag and send ongoing notifications again
+        pausedNotificationSent = false
+        lyricNotificationManager.showOrUpdate(currentLine, ongoing = true)
     }
 
     fun refreshLyricNotification() {
         updateLyricNotification(_lyrics.value, _nowPlayingMusic.value)
     }
+
     
     /**
      * 设置媒体监听
@@ -115,9 +153,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mediaInfoService.nowPlayingMusic.collect { music ->
                 // 检查是否为新歌曲（标题或歌手改变）
                 val oldMusic = _nowPlayingMusic.value
-                val isMusicChanged = oldMusic?.let { 
-                    it.title != music?.title || it.artist != music?.artist 
-                } ?: (music != null)
+                val isMusicChanged =
+                    oldMusic?.title != music?.title ||
+                    oldMusic?.artist != music?.artist
                 
                 _nowPlayingMusic.value = music
                 Timber.d("Now playing: ${music?.title} - ${music?.artist}")
@@ -280,7 +318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 导出歌词为 TTML 文件
      */
-    fun exportLyricsAsTTML(fileName: String = "lyrics.ttml"): String? {
+    fun exportLyricsAsTTML(): String? {
         val currentLyrics = _lyrics.value ?: return null
         return TTMLConverter.toTTMLString(currentLyrics, formatted = true)
     }
@@ -326,6 +364,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     override fun onCleared() {
         super.onCleared()
+        // unregister broadcast listener added earlier
+        context.unregisterReceiver(deleteReceiver)
         lyricNotificationManager.cancel()
         mediaInfoService.stopListening()
         httpClient.close()

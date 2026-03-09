@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.TextSnippet
+
+// icons are deprecated but AutoMirrored is unavailable; suppress warnings where used
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -89,7 +91,7 @@ class CustomLyricsActivity : ComponentActivity() {
                                 putExtra(EXTRA_LYRICS_TEXT, lyricsText)
                                 putExtra(EXTRA_SOURCE, appliedSource ?: "manual")
                             }
-                            setResult(Activity.RESULT_OK, result)
+                            setResult(RESULT_OK, result)
                             finish()
                         }
                     )
@@ -164,6 +166,7 @@ private fun CustomLyricsPage(
             title = { Text("自选歌词") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
+                    @Suppress("DEPRECATION")
                     Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                 }
             },
@@ -171,6 +174,7 @@ private fun CustomLyricsPage(
                 IconButton(onClick = {
                     context.startActivity(Intent(context, LyricsCacheActivity::class.java))
                 }) {
+                    @Suppress("DEPRECATION")
                     Icon(Icons.Default.TextSnippet, contentDescription = "缓存歌词")
                 }
             }

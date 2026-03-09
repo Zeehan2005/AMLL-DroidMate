@@ -212,7 +212,7 @@ class MediaInfoService(private val context: Context) {
 
         val packageName = controller.packageName
         val playbackState = controller.playbackState?.state
-        controller.transportControls?.seekTo(position)
+        controller.transportControls.seekTo(position)
         Timber.i("Seek command sent: target=$position ms, package=$packageName, playbackState=$playbackState")
     }
     

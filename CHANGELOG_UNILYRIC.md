@@ -114,6 +114,7 @@ fun fetchLyrics()
 
 **歌词通知**
 - 播放暂停时不再直接取消通知，而是将其更新为**可清理**的普通通知，方便一键清除；播放恢复时重新标记为 ongoing。
+- 在暂停状态下应用只会发送一次 **ongoing=false** 的通知，然后不再更新歌词行，直到播放恢复。无论用户是否滑掉通知，这个暂停‑后‑停止的逻辑都适用。
 - `MainViewModel.updateLyricNotification()` 现在传递 `ongoing` 标志给 `LyricNotificationManager`。
 - 添加了 `ongoing` 参数到 `LyricNotificationManager.showOrUpdate()`。
 ### 3. 文档更新
