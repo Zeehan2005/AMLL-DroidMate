@@ -1501,7 +1501,12 @@ class LyricsRepository(private val httpClient: HttpClient) {
          */
         fun parseTTML(ttmlContent: String): TTMLLyrics? {
             return try {
+                Timber.d("[BG-LYRICS-DEBUG] LyricsRepository.parseTTML input: length=${ttmlContent.length}, hasXbg=${ttmlContent.contains("ttm:role=\"x-bg\"")}, hasXTranslation=${ttmlContent.contains("ttm:role=\"x-translation\"")}")
                 val lines = TTMLParser.parse(ttmlContent)
+                val bgLines = lines.filter { it.isBG }
+                val bgWithTranslation = bgLines.count { !it.translation.isNullOrBlank() }
+                val sampleBg = bgLines.firstOrNull()
+                Timber.d("[BG-LYRICS-DEBUG] LyricsRepository.parseTTML output: total=${lines.size}, bg=${bgLines.size}, bgWithTrans=$bgWithTranslation, sampleBg='${sampleBg?.text?.take(40) ?: ""}', sampleTrans='${sampleBg?.translation?.take(40) ?: ""}'")
                 TTMLLyrics(
                     metadata = TTMLMetadata(
                         title = "Unknown",

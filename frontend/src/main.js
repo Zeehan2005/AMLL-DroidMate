@@ -48,6 +48,14 @@ function logToAndroid(message) {
   }
 }
 
+function stripLeadingBgBracket(text) {
+  return String(text ?? '').replace(/^\s*[\(（]\s*/, '')
+}
+
+function stripTrailingBgBracket(text) {
+  return String(text ?? '').replace(/\s*[\)）]\s*$/, '')
+}
+
 function toWordEntries(line) {
   if (Array.isArray(line?.words) && line.words.length > 0) {
     const mapped = line.words.map((word) => ({
@@ -56,7 +64,7 @@ function toWordEntries(line) {
       endTime: Number(word?.endTime ?? line?.endTime ?? line?.startTime ?? 0),
     }))
 
-    return mapped.map((word) => {
+    const normalized = mapped.map((word) => {
       const startTime = Number.isFinite(word.startTime) ? word.startTime : 0
       const endTime = Number.isFinite(word.endTime) ? word.endTime : startTime
       return {
@@ -65,6 +73,50 @@ function toWordEntries(line) {
         endTime: Math.max(startTime, endTime),
       }
     })
+
+    // 背景歌词：去除第一个词开头的'('和最后一个词结尾的')'
+    if (line?.isBG && normalized.length > 0) {
+      logToAndroid(`[BG-LYRICS-DEBUG] Processing background lyrics with ${normalized.length} words`)
+      
+      // 去除第一个词的开头括号
+      const firstWord = normalized[0]
+      const originalFirst = firstWord.word
+      firstWord.word = stripLeadingBgBracket(firstWord.word)
+      if (firstWord.word !== originalFirst) {
+        logToAndroid(`[BG-LYRICS-DEBUG] Removed leading bracket from first word: "${originalFirst}" -> "${firstWord.word}"`)
+      } else {
+        logToAndroid(`[BG-LYRICS-DEBUG] First word unchanged after bracket strip: "${originalFirst}"`)
+      }
+
+      // 去除最后一个词的结尾括号
+      const lastWord = normalized[normalized.length - 1]
+      const originalLast = lastWord.word
+      lastWord.word = stripTrailingBgBracket(lastWord.word)
+      if (lastWord.word !== originalLast) {
+        logToAndroid(`[BG-LYRICS-DEBUG] Removed trailing bracket from last word: "${originalLast}" -> "${lastWord.word}"`)
+      } else {
+        logToAndroid(`[BG-LYRICS-DEBUG] Last word unchanged after bracket strip: "${originalLast}"`)
+      }
+
+      const afterText = normalized.map((w) => w.word).join('')
+      logToAndroid(`[BG-LYRICS-DEBUG] BG words after strip: "${afterText}"`)
+
+      for (let i = normalized.length - 1; i >= 0; i -= 1) {
+        if (String(normalized[i].word ?? '').length === 0) {
+          normalized.splice(i, 1)
+        }
+      }
+
+      if (normalized.length === 0) {
+        normalized.push({
+          word: ' ',
+          startTime: Number(line?.startTime ?? 0),
+          endTime: Number(line?.endTime ?? line?.startTime ?? 0),
+        })
+      }
+    }
+
+    return normalized
   }
 
   const lineText = String(line?.text ?? '').trim()
@@ -87,7 +139,7 @@ function normalizeLyricLines(lines) {
     const startTime = Number(line?.startTime ?? wordStart)
     const endTime = Number(line?.endTime ?? wordEnd)
 
-    return {
+    const result = {
       words,
       translatedLyric: String(line?.translatedLyric ?? ''),
       romanLyric: String(line?.romanLyric ?? ''),
@@ -96,6 +148,14 @@ function normalizeLyricLines(lines) {
       isBG: Boolean(line?.isBG),
       isDuet: Boolean(line?.isDuet),
     }
+
+    // 调试背景歌词的翻译
+    if (result.isBG) {
+      const wordsText = words.map(w => w.word).join('')
+      logToAndroid(`[BG-LYRICS-DEBUG] Background line: "${wordsText}" | translation: "${result.translatedLyric}" | roman: "${result.romanLyric}"`)
+    }
+
+    return result
   })
 }
 
@@ -448,6 +508,16 @@ window.setRenderMode = function (mode) {
 window.updateLyrics = function (lyricsPayload) {
   try {
     const rawLines = Array.isArray(lyricsPayload?.lines) ? lyricsPayload.lines : []
+    
+    // 调试：检查接收到的背景歌词原始数据
+    const bgLines = rawLines.filter(line => line?.isBG)
+    if (bgLines.length > 0) {
+      logToAndroid(`[BG-LYRICS-DEBUG] Received ${bgLines.length} BG lines from backend`)
+      bgLines.slice(0, 3).forEach((line, idx) => {
+        logToAndroid(`[BG-LYRICS-DEBUG] Raw BG line ${idx}: text="${line?.text}" translation="${line?.translatedLyric}" words=${line?.words?.length || 0}`)
+      })
+    }
+    
     state.lyricLines = normalizeLyricLines(rawLines)
 
     if (player) {

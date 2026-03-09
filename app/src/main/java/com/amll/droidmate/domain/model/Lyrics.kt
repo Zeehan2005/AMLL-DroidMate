@@ -40,7 +40,8 @@ data class LyricLine(
     val transliteration: String? = null,  // 音译
     val words: List<LyricWord> = emptyList(),  // 逐词信息
     val isBG: Boolean = false,  // 是否为背景音声
-    val isDuet: Boolean = false  // 是否为合唱
+    val isDuet: Boolean = false,  // 是否为合唱
+    val agent: String? = null  // 原始agent信息（用于TTML导出）
 )
 
 /**

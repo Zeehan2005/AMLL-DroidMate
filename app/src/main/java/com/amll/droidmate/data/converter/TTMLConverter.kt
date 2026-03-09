@@ -67,7 +67,7 @@ object TTMLConverter {
             val begin = formatTime(line.startTime)
             val end = formatTime(line.endTime)
             val lineNum = "L${index + 1}"
-            val agentAttr = if (line.isDuet) " ttm:agent=\"v2\"" else ""
+            val agentAttr = line.agent?.let { " ttm:agent=\"$it\"" } ?: ""
             
             sb.append("""${indent}${indent}<p begin="$begin" end="$end" itunes:key="$lineNum"$agentAttr>""")
             if (formatted) sb.append("\n")
@@ -118,20 +118,31 @@ object TTMLConverter {
             }
 
             if (line.isBG) {
+                // BG 行的翻译与音译应作为 x-bg 的子节点，避免二次解析时被当作主歌词翻译。
+                line.translation?.let {
+                    sb.append("""$spanIndent<span ttm:role="x-translation" xml:lang="zh-CN">${escapeXML(it)}</span>""")
+                    if (formatted) sb.append("\n")
+                }
+
+                line.transliteration?.let {
+                    sb.append("""$spanIndent<span ttm:role="x-roman" xml:lang="ja-Latn">${escapeXML(it)}</span>""")
+                    if (formatted) sb.append("\n")
+                }
+
                 sb.append("""$lineContentIndent$lineWrapSuffix""")
                 if (formatted) sb.append("\n")
-            }
-            
-            // Translation if available
-            line.translation?.let {
-                sb.append("""$lineContentIndent<span ttm:role="x-translation" xml:lang="zh-CN">${escapeXML(it)}</span>""")
-                if (formatted) sb.append("\n")
-            }
-            
-            // Transliteration if available
-            line.transliteration?.let {
-                sb.append("""$lineContentIndent<span ttm:role="x-roman" xml:lang="ja-Latn">${escapeXML(it)}</span>""")
-                if (formatted) sb.append("\n")
+            } else {
+                // Translation if available
+                line.translation?.let {
+                    sb.append("""$lineContentIndent<span ttm:role="x-translation" xml:lang="zh-CN">${escapeXML(it)}</span>""")
+                    if (formatted) sb.append("\n")
+                }
+
+                // Transliteration if available
+                line.transliteration?.let {
+                    sb.append("""$lineContentIndent<span ttm:role="x-roman" xml:lang="ja-Latn">${escapeXML(it)}</span>""")
+                    if (formatted) sb.append("\n")
+                }
             }
             
             sb.append("""${indent}${indent}</p>""")

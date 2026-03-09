@@ -14,6 +14,23 @@ import timber.log.Timber
  * 参考: https://github.com/apoint123/Unilyric/tree/main/lyrics_helper_rs
  */
 object UnifiedLyricsParser {
+
+    private fun summarizeBgLines(lines: List<LyricLine>): String {
+        val bgLines = lines.filter { it.isBG }
+        val withTranslation = bgLines.count { !it.translation.isNullOrBlank() }
+        val withRoman = bgLines.count { !it.transliteration.isNullOrBlank() }
+        val sample = bgLines.firstOrNull()
+        val sampleText = sample?.text ?: ""
+        val sampleTranslation = sample?.translation ?: ""
+        return "bg=${bgLines.size}, bgWithTrans=$withTranslation, bgWithRoman=$withRoman, sampleBg='${sampleText.take(40)}', sampleTrans='${sampleTranslation.take(40)}'"
+    }
+
+    private fun callerTrace(): String {
+        return Throwable().stackTrace
+            .drop(2)
+            .take(5)
+            .joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+    }
     
     /**
      * 解析歌词内容为 TTMLLyrics 对象
@@ -36,6 +53,7 @@ object UnifiedLyricsParser {
         }
         
         Timber.d("Lyrics content preview (first 300 chars): ${content.take(300)}")
+        Timber.d("[BG-LYRICS-DEBUG] UnifiedLyricsParser.parse caller trace: ${callerTrace()}")
         
         return try {
             // 检测格式
@@ -72,7 +90,10 @@ object UnifiedLyricsParser {
                 LyricsFormat.TTML -> {
                     // TTML 格式使用专用解析器
                     Timber.d("Parsing TTML format")
-                    TTMLParser.parse(content)
+                    Timber.d("[BG-LYRICS-DEBUG] Unified TTML input has x-bg=${content.contains("ttm:role=\"x-bg\"")}, x-translation=${content.contains("ttm:role=\"x-translation\"")}, length=${content.length}")
+                    val parsed = TTMLParser.parse(content)
+                    Timber.d("[BG-LYRICS-DEBUG] Unified TTML parsed summary: ${summarizeBgLines(parsed)}")
+                    parsed
                 }
                 LyricsFormat.PLAIN_TEXT -> {
                     // 纯文本格式转换为简单行
@@ -90,6 +111,7 @@ object UnifiedLyricsParser {
             // 构建 TTMLLyrics 对象
             val sortedLines = lines.sortedBy { it.startTime }
             val duration = sortedLines.lastOrNull()?.endTime ?: 0L
+            Timber.d("[BG-LYRICS-DEBUG] Unified final sorted summary: total=${sortedLines.size}, ${summarizeBgLines(sortedLines)}")
             
             TTMLLyrics(
                 metadata = TTMLMetadata(

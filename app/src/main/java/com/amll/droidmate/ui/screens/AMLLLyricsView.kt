@@ -254,6 +254,12 @@ private fun escapeJsString(value: String): String {
 }
 
 private fun buildLyricsJson(lyrics: TTMLLyrics): String {
+    val bgLines = lyrics.lines.filter { it.isBG }
+    val bgWithTranslation = bgLines.count { !it.translation.isNullOrBlank() }
+    val bgWithRoman = bgLines.count { !it.transliteration.isNullOrBlank() }
+    val sampleBg = bgLines.firstOrNull()
+    amllDebug("[BG-LYRICS-DEBUG] buildLyricsJson summary: total=${lyrics.lines.size}, bg=${bgLines.size}, bgWithTrans=$bgWithTranslation, bgWithRoman=$bgWithRoman, sampleBg='${sampleBg?.text ?: ""}', sampleTrans='${sampleBg?.translation ?: ""}'")
+
     val linesJson = lyrics.lines.joinToString(",") { line ->
         val text = line.text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         val translation = line.translation?.replace("\\", "\\\\")?.replace("\"", "\\\"") ?: ""
@@ -274,6 +280,11 @@ private fun buildLyricsJson(lyrics: TTMLLyrics): String {
         // 调试日志
         if (line.words.isNotEmpty()) {
             amllDebug("Building JSON for line: '${line.text}' with ${line.words.size} words")
+        }
+        
+        // 调试背景歌词的数据传递
+        if (line.isBG) {
+            amllDebug("[BG-LYRICS-DEBUG] JSON for BG line: text='$text' translation='$translation' roman='$transliteration' isBG=${line.isBG}")
         }
         
         """{

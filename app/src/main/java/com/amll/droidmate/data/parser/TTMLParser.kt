@@ -37,7 +37,9 @@ object TTMLParser {
         val mainWords: MutableList<LyricWord> = mutableListOf(),
         val bgWords: MutableList<LyricWord> = mutableListOf(),
         var translation: String? = null,
-        var transliteration: String? = null
+        var transliteration: String? = null,
+        var bgTranslation: String? = null,
+        var bgTransliteration: String? = null
     )
 
     private fun parseTTMLDocument(doc: Document): List<LyricLine> {
@@ -48,6 +50,10 @@ object TTMLParser {
             val paragraphs = body.getElementsByTagName("p")
             for (i in 0 until paragraphs.length) {
                 val pElement = paragraphs.item(i) as? Element ?: continue
+                val rawAgent = pElement.getAttribute("ttm:agent").ifBlank { pElement.getAttribute("agent") }
+                if (i < 5 || i >= paragraphs.length - 2) {
+                    Timber.d("[AGENT-DEBUG-RAW] Para $i: raw ttm:agent='$rawAgent'")
+                }
                 parseParagraph(pElement)?.let { parsedParagraphs.add(it) }
             }
         } catch (e: Exception) {
@@ -55,17 +61,43 @@ object TTMLParser {
             return emptyList()
         }
 
-        val primaryAgent = parsedParagraphs
-            .mapNotNull { it.agent }
-            .firstOrNull()
+        val normalizedAgents = parsedParagraphs.map { normalizeAgent(it.agent) }
+        val uniqueAgents = normalizedAgents.filterNotNull().distinct()
+        
+        Timber.d("[AGENT-DEBUG] Total lines: ${parsedParagraphs.size}, unique agents: ${uniqueAgents.size}, agents: $uniqueAgents")
+        
+        val duetFlags = when {
+            uniqueAgents.size <= 1 -> {
+                Timber.d("[AGENT-DEBUG] Mode: single or no agent (all isDuet=false)")
+                List(parsedParagraphs.size) { false }
+            }
+            uniqueAgents.size == 2 -> {
+                val leftAgent = pickLeftAgentForTwo(uniqueAgents[0], uniqueAgents[1])
+                Timber.d("[AGENT-DEBUG] Mode: exactly 2 agents. leftAgent=$leftAgent, rightAgent=${uniqueAgents.firstOrNull { it != leftAgent }}")
+                normalizedAgents.mapIndexed { idx, agent ->
+                    val isDuet = agent != null && agent != leftAgent
+                    if (idx < 5) Timber.d("[AGENT-DEBUG] Line $idx: agent=$agent -> isDuet=$isDuet")
+                    isDuet
+                }
+            }
+            else -> {
+                Timber.d("[AGENT-DEBUG] Mode: >2 agents, alternating mode")
+                val flags = buildAlternatingDuetFlags(normalizedAgents)
+                flags.mapIndexed { idx, isDuet ->
+                    if (idx < 10) Timber.d("[AGENT-DEBUG] Line $idx: agent=${normalizedAgents[idx]} -> isDuet=$isDuet")
+                    isDuet
+                }
+            }
+        }
 
         val lines = mutableListOf<LyricLine>()
-        for (parsed in parsedParagraphs) {
-            val isDuet = isDuetAgent(parsed.agent, primaryAgent)
+        for ((index, parsed) in parsedParagraphs.withIndex()) {
+            val isDuet = duetFlags.getOrElse(index) { false }
             parsed.mainLine?.let { lines.add(it.copy(isDuet = isDuet)) }
             parsed.bgLine?.let { lines.add(it.copy(isBG = true, isDuet = isDuet)) }
         }
 
+        Timber.d("[AGENT-DEBUG] Parse complete: ${lines.size} total output lines")
         return lines
     }
 
@@ -111,7 +143,8 @@ object TTMLParser {
                     text = mainText,
                     translation = buffer.translation,
                     transliteration = buffer.transliteration,
-                    words = buffer.mainWords.toList()
+                    words = buffer.mainWords.toList(),
+                    agent = agent
                 )
             } else {
                 null
@@ -121,12 +154,16 @@ object TTMLParser {
                 val bgStart = buffer.bgWords.firstOrNull()?.startTime ?: startTime
                 val bgEndRaw = buffer.bgWords.lastOrNull()?.endTime ?: endTime
                 val bgEnd = maxOf(bgStart, bgEndRaw)
+                timber.log.Timber.d("[BG-LYRICS-DEBUG] Creating BG line: text='$bgText' translation='${buffer.bgTranslation}' roman='${buffer.bgTransliteration}'")
                 LyricLine(
                     startTime = bgStart,
                     endTime = bgEnd,
                     text = bgText,
+                    translation = buffer.bgTranslation,
+                    transliteration = buffer.bgTransliteration,
                     words = buffer.bgWords.toList(),
-                    isBG = true
+                    isBG = true,
+                    agent = agent
                 )
             } else {
                 null
@@ -169,16 +206,38 @@ object TTMLParser {
                     val role = readRoleAttr(element)
                     when (role) {
                         "x-translation" -> {
-                            if (!inBackground) {
-                                val text = normalizeAuxiliaryText(element.textContent ?: "")
-                                if (text.isNotEmpty()) buffer.translation = text
+                            val text = normalizeAuxiliaryText(element.textContent ?: "")
+                            if (text.isNotEmpty()) {
+                                if (inBackground) {
+                                    buffer.bgTranslation = text
+                                    timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG translation: $text")
+                                } else {
+                                    // 兼容部分 TTML：x-bg 与 x-translation 平级时，将翻译归属到背景行。
+                                    if (buffer.mainWords.isEmpty() && buffer.bgWords.isNotEmpty()) {
+                                        buffer.bgTranslation = text
+                                        timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG translation (fallback outside x-bg): $text")
+                                    } else {
+                                        buffer.translation = text
+                                    }
+                                }
                             }
                         }
 
                         "x-roman", "x-romanization" -> {
-                            if (!inBackground) {
-                                val text = normalizeAuxiliaryText(element.textContent ?: "")
-                                if (text.isNotEmpty()) buffer.transliteration = text
+                            val text = normalizeAuxiliaryText(element.textContent ?: "")
+                            if (text.isNotEmpty()) {
+                                if (inBackground) {
+                                    buffer.bgTransliteration = text
+                                    timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration: $text")
+                                } else {
+                                    // 兼容部分 TTML：x-bg 与 x-roman 平级时，将音译归属到背景行。
+                                    if (buffer.mainWords.isEmpty() && buffer.bgWords.isNotEmpty()) {
+                                        buffer.bgTransliteration = text
+                                        timber.log.Timber.d("[BG-LYRICS-DEBUG] Collected BG transliteration (fallback outside x-bg): $text")
+                                    } else {
+                                        buffer.transliteration = text
+                                    }
+                                }
                             }
                         }
 
@@ -333,15 +392,58 @@ object TTMLParser {
         return raw.ifBlank { null }
     }
 
-    private fun isDuetAgent(agent: String?, primaryAgent: String?): Boolean {
-        val normalized = agent?.trim()?.lowercase() ?: return false
-        val normalizedPrimary = primaryAgent?.trim()?.lowercase()
+    private fun normalizeAgent(agent: String?): String? {
+        val normalized = agent?.trim()?.lowercase()?.removePrefix("#")
+        return normalized?.ifBlank { null }
+    }
 
-        if (normalized.contains("duet") || normalized.contains("anti")) return true
-        if (normalized == "v2") return true
-        if (normalizedPrimary != null && normalized != normalizedPrimary) return true
+    private fun pickLeftAgentForTwo(agentA: String, agentB: String): String {
+        val numberA = extractFirstNumber(agentA)
+        val numberB = extractFirstNumber(agentB)
 
-        return false
+        val result = when {
+            numberA != null && numberB != null -> if (numberA <= numberB) agentA else agentB
+            numberA != null -> agentA
+            numberB != null -> agentB
+            else -> if (agentA <= agentB) agentA else agentB
+        }
+        
+        Timber.d("[AGENT-DEBUG] pickLeftAgentForTwo: agentA='$agentA'(num=$numberA) vs agentB='$agentB'(num=$numberB) -> leftAgent='$result'")
+        return result
+    }
+
+    private fun buildAlternatingDuetFlags(agents: List<String?>): List<Boolean> {
+        val flags = MutableList(agents.size) { false }
+        var lastAgent: String? = null
+        var currentIsRight = false
+
+        for (i in agents.indices) {
+            val agent = agents[i]
+            if (agent == null) {
+                flags[i] = currentIsRight
+                continue
+            }
+
+            if (lastAgent == null) {
+                // 多 agent 模式下，首个声部固定在左侧。
+                currentIsRight = false
+                lastAgent = agent
+                Timber.d("[AGENT-DEBUG] alternating: line $i first agent='$agent' -> isDuet=$currentIsRight")
+            } else if (agent != lastAgent) {
+                currentIsRight = !currentIsRight
+                Timber.d("[AGENT-DEBUG] alternating: line $i agent change from '$lastAgent' to '$agent' -> isDuet=$currentIsRight")
+                lastAgent = agent
+            }
+
+            flags[i] = currentIsRight
+        }
+
+        return flags
+    }
+
+    private fun extractFirstNumber(value: String): Int? {
+        val match = Regex("\\d+").find(value) ?: return null
+        return match.value.toIntOrNull()
     }
 
     private fun appendDelimiterSpaceIfNeeded(
