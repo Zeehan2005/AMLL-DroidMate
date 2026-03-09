@@ -242,6 +242,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
+     * 直接应用 TTMLLyrics 对象（跳过重新解析，用于 AMLL 候选歌词等）
+     */
+    fun applyTTMLLyrics(lyrics: TTMLLyrics) {
+        viewModelScope.launch {
+            try {
+                _lyrics.value = lyrics
+                _errorMessage.value = null
+                lyricsCacheRepository.upsert(
+                    title = lyrics.metadata.title,
+                    artist = lyrics.metadata.artist,
+                    source = "manual",
+                    ttmlContent = TTMLConverter.toTTMLString(lyrics)
+                )
+                Timber.i("Applied TTML lyrics directly: ${lyrics.metadata.title} - ${lyrics.metadata.artist}")
+            } catch (e: Exception) {
+                _errorMessage.value = "应用歌词失败: ${e.message}"
+                Timber.e(e, "Error applying TTML lyrics")
+            }
+        }
+    }
+    
+    /**
      * 导出歌词为 TTML 文件
      */
     fun exportLyricsAsTTML(fileName: String = "lyrics.ttml"): String? {

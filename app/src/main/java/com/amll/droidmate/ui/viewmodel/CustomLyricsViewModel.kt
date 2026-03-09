@@ -7,6 +7,7 @@ import com.amll.droidmate.data.converter.TTMLConverter
 import com.amll.droidmate.data.network.HttpClientFactory
 import com.amll.droidmate.data.repository.LyricsRepository
 import com.amll.droidmate.domain.model.LyricsSearchResult
+import com.amll.droidmate.domain.model.TTMLLyrics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -44,6 +45,10 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     private val _appliedLyricsText = MutableStateFlow<String?>(null)
     val appliedLyricsText: StateFlow<String?> = _appliedLyricsText
 
+    private val _appliedLyrics = MutableStateFlow<TTMLLyrics?>(null)
+    val appliedLyrics: StateFlow<TTMLLyrics?> = _appliedLyrics
+
+
     fun searchCandidates(title: String, artist: String) {
         if (title.isBlank() && artist.isBlank()) return
 
@@ -76,8 +81,8 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                     candidate.artist
                 )
                 if (result.isSuccess && result.lyrics != null) {
-                    // 转换为TTML格式以保留words数组(逐词同步数据)
-                    _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
+                    // 直接返回 TTMLLyrics 对象，由 MainViewModel 直接应用，避免不必要的字符串往返
+                    _appliedLyrics.value = result.lyrics
                 } else {
                     _errorMessage.value = result.errorMessage ?: "应用候选歌词失败"
                 }
