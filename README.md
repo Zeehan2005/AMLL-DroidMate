@@ -136,4 +136,4 @@ npm.cmd run build:android
 
 ## 许可证
 
-MIT
+[LICENSE](https://github.com/Zeehan2005/AMLL-DroidMate/blob/main/LICENSE.txt)
