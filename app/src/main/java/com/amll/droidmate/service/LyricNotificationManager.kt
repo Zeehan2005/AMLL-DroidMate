@@ -15,7 +15,7 @@ import com.amll.droidmate.MainActivity
 import com.amll.droidmate.R
 import com.amll.droidmate.domain.model.LyricLine
 
-class LyricNotificationManager(private val context: Context) {
+open class LyricNotificationManager(private val context: Context) {
 
     /**
      * Show or update the live lyric notification.
@@ -24,7 +24,7 @@ class LyricNotificationManager(private val context: Context) {
      * @param ongoing if true the notification is marked ongoing (non-dismissable);
      *                if false it may be swiped away by the user.
      */
-    fun showOrUpdate(currentLine: LyricLine?, ongoing: Boolean = true) {
+    open fun showOrUpdate(currentLine: LyricLine?, ongoing: Boolean = true) {
         if (!hasNotificationPermission()) return
 
         createChannelIfNeeded()
@@ -69,7 +69,7 @@ class LyricNotificationManager(private val context: Context) {
         return lines.joinToString(separator = "\n")
     }
 
-    fun cancel() {
+    open fun cancel() {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
     }
 
