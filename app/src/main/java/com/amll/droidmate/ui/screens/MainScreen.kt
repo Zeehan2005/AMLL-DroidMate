@@ -28,6 +28,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +52,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -829,21 +835,30 @@ fun NowPlayingCard(
                     }
                 }
 
-                // 播放控制按钮（全宽，支持长按持续触发）
+                // 播放控制按钮（3:5:3 比例，全部可触摸）
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(72.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     var rewindJob by remember { mutableStateOf<Job?>(null) }
+                    val leftInteractionSource = remember { MutableInteractionSource() }
                     
+                    // 左侧区域 (3份) - 上一首/快退
                     Box(
                         modifier = Modifier
+                            .weight(3f)
+                            .fillMaxHeight()
                             .clip(RoundedCornerShape(50))
+                            .indication(leftInteractionSource, rememberRipple())
                             .pointerInput(Unit) {
                                 detectTapGestures(
                                     onTap = { onSkipPreviousClick() },
-                                    onPress = {
+                                    onPress = { offset ->
+                                        val press = PressInteraction.Press(offset)
+                                        leftInteractionSource.tryEmit(press)
+                                        
                                         val longPressTimeout = 500L
                                         val repeatInterval = 200L
                                         
@@ -864,50 +879,62 @@ fun NowPlayingCard(
                                                 longPressJob.cancel()
                                                 
                                                 if (up == null) {
-                                                    // 取消
+                                                    leftInteractionSource.tryEmit(PressInteraction.Cancel(press))
                                                 } else {
-                                                    val pressDuration = up.uptimeMillis - down.uptimeMillis
-                                                    if (pressDuration < longPressTimeout) {
-                                                        // 短按，已通过 onTap 处理
-                                                    }
+                                                    leftInteractionSource.tryEmit(PressInteraction.Release(press))
                                                 }
                                             }
                                         } catch (e: Exception) {
+                                            leftInteractionSource.tryEmit(PressInteraction.Cancel(press))
                                             rewindJob?.cancel()
                                         }
                                     }
                                 )
                             }
-                            .padding(8.dp)
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.SkipPrevious,
+                            Icons.Default.FastRewind,
                             contentDescription = "上一首（长按快退）",
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                     
-                    Spacer(modifier = Modifier.width(12.dp))
-                    
-                    IconButton(onClick = onPlayPauseClick) {
+                    // 中间区域 (5份) - 播放/暂停
+                    Box(
+                        modifier = Modifier
+                            .weight(5f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onPlayPauseClick() }
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             if (nowPlaying.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (nowPlaying.isPlaying) "暂停" else "播放",
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(42.dp)
                         )
                     }
                     
-                    Spacer(modifier = Modifier.width(12.dp))
-                    
                     var fastForwardJob by remember { mutableStateOf<Job?>(null) }
+                    val rightInteractionSource = remember { MutableInteractionSource() }
                     
+                    // 右侧区域 (3份) - 下一首/快进
                     Box(
                         modifier = Modifier
+                            .weight(3f)
+                            .fillMaxHeight()
                             .clip(RoundedCornerShape(50))
+                            .indication(rightInteractionSource, rememberRipple())
                             .pointerInput(Unit) {
                                 detectTapGestures(
                                     onTap = { onSkipNextClick() },
-                                    onPress = {
+                                    onPress = { offset ->
+                                        val press = PressInteraction.Press(offset)
+                                        rightInteractionSource.tryEmit(press)
+                                        
                                         val longPressTimeout = 500L
                                         val repeatInterval = 200L
                                         
@@ -928,26 +955,25 @@ fun NowPlayingCard(
                                                 longPressJob.cancel()
                                                 
                                                 if (up == null) {
-                                                    // 取消
+                                                    rightInteractionSource.tryEmit(PressInteraction.Cancel(press))
                                                 } else {
-                                                    val pressDuration = up.uptimeMillis - down.uptimeMillis
-                                                    if (pressDuration < longPressTimeout) {
-                                                        // 短按，已通过 onTap 处理
-                                                    }
+                                                    rightInteractionSource.tryEmit(PressInteraction.Release(press))
                                                 }
                                             }
                                         } catch (e: Exception) {
+                                            rightInteractionSource.tryEmit(PressInteraction.Cancel(press))
                                             fastForwardJob?.cancel()
                                         }
                                     }
                                 )
                             }
-                            .padding(8.dp)
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.SkipNext,
+                            Icons.Default.FastForward,
                             contentDescription = "下一首（长按快进）",
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
