@@ -383,10 +383,11 @@ function applyPlayerStyle(element) {
   element.style.mixBlendMode = 'plus-lighter'
   element.style.color = '#f5f7ff'
   element.style.fontFamily = '"SF Pro Display", "PingFang SC", system-ui, -apple-system, "Segoe UI", sans-serif'
+  element.style.fontWeight = '700'
   element.style.setProperty('--amll-lp-color', '#f5f7ff')
   element.style.setProperty('--amll-lp-bg-color', 'rgba(0, 0, 0, 0.28)')
   element.style.setProperty('--amll-lp-hover-bg-color', 'rgba(255, 255, 255, 0.12)')
-  element.style.setProperty('--amll-lp-font-size', 'clamp(22px, 3.6vh, 32px)')
+  element.style.setProperty('--amll-lp-font-size', 'clamp(30px, 4vh, 36px)')
 
   // 触摸导致全局去模糊时，仅对背景歌词加回固定模糊，主歌词保持清晰
   element.style.setProperty('--amll-touch-bg-blur', '10px')
