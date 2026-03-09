@@ -467,7 +467,18 @@ fun MainScreen() {
                         viewModel.play()
                     }
                 },
-                onSkipPreviousClick = { viewModel.skipToPrevious() },
+                onSkipPreviousClick = { 
+                    val skipPreviousRewinds = AppSettings.isSkipPreviousRewindsEnabled(context)
+                    val currentPosition = nowPlaying?.currentPosition ?: 0L
+                    
+                    if (skipPreviousRewinds && currentPosition > 3000) {
+                        // 如果启用了该功能且当前位置大于3秒,回到开头
+                        viewModel.seekTo(0L)
+                    } else {
+                        // 否则跳到上一首
+                        viewModel.skipToPrevious()
+                    }
+                },
                 onSkipNextClick = { viewModel.skipToNext() },
                 onRewind = { viewModel.rewind() },
                 onFastForward = { viewModel.fastForward() },

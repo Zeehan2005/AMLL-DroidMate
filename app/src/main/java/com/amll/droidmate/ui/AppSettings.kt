@@ -35,6 +35,7 @@ object AppSettings {
     private const val KEY_AUTO_UPDATE_CHECK_ENABLED = "auto_update_check_enabled"
     private const val KEY_UPDATE_CHANNEL = "update_channel"
     private const val KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at"
+    private const val KEY_SKIP_PREVIOUS_REWINDS = "skip_previous_rewinds"
 
     private const val DEFAULT_AMLL_FONT_FAMILY = "\"SF Pro Display\", \"PingFang SC\", system-ui, -apple-system, \"Segoe UI\", sans-serif"
 
@@ -125,5 +126,15 @@ object AppSettings {
     fun setLastUpdateCheckAt(context: Context, timestampMillis: Long) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, timestampMillis).apply()
+    }
+
+    fun isSkipPreviousRewindsEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_SKIP_PREVIOUS_REWINDS, false)
+    }
+
+    fun setSkipPreviousRewindsEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_SKIP_PREVIOUS_REWINDS, enabled).apply()
     }
 }

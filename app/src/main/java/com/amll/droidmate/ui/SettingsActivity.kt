@@ -96,6 +96,7 @@ private fun SettingsPage(
     var fontStatusMessage by remember { mutableStateOf<String?>(null) }
     var autoCheckEnabled by remember { mutableStateOf(AppSettings.isAutoUpdateCheckEnabled(context)) }
     var updateChannel by remember { mutableStateOf(AppSettings.getUpdateChannel(context)) }
+    var skipPreviousRewinds by remember { mutableStateOf(AppSettings.isSkipPreviousRewindsEnabled(context)) }
     var updateDialogTitle by remember { mutableStateOf("") }
     var updateDialogMessage by remember { mutableStateOf("") }
     var updateDialogUrl by remember { mutableStateOf<String?>(null) }
@@ -193,8 +194,10 @@ private fun SettingsPage(
             }
 
 
-            Text(
-                text = "“正在播放”卡片点击行为",
+            
+
+
+            Text(                text = "“正在播放”卡片点击行为",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -232,17 +235,40 @@ private fun SettingsPage(
                     )
                 }
             }
-
-            Text(
-                text = "通知访问权限（获取正在播放）",
+            Text(                text = "辅助功能",
                 style = MaterialTheme.typography.titleMedium
             )
-            Button(
-                onClick = onOpenNotificationSettings,
-                modifier = Modifier.fillMaxWidth()
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Text("打开通知访问设置")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth(0.75f)) {
+                        Text("第一次点击上一首回到 0:00")
+                        Text(
+                            text = "启用后,点击上一首按钮会先回到歌曲开头,而不是直接跳转到上一首",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                    Switch(
+                        checked = skipPreviousRewinds,
+                        onCheckedChange = { enabled ->
+                            skipPreviousRewinds = enabled
+                            AppSettings.setSkipPreviousRewindsEnabled(context, enabled)
+                        }
+                    )
+                }
             }
+
+
+            
 
             Text(
                 text = "版本更新",
@@ -337,6 +363,17 @@ private fun SettingsPage(
                         Text(if (checkingUpdate) "检查中..." else "检查更新")
                     }
                 }
+            }
+
+            Text(
+                text = "通知访问权限（获取正在播放）",
+                style = MaterialTheme.typography.titleMedium
+            )
+            TextButton(
+                onClick = onOpenNotificationSettings,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("打开通知访问设置")
             }
 
             Text(
