@@ -1,6 +1,15 @@
 
 # AMLL DroidMate
 
+
+
+傻瓜式 Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
+
+![Image](https://github.com/user-attachments/assets/266ed199-3763-4567-bfc3-3aa6fcd602f7)
+![Image](https://github.com/user-attachments/assets/7d7a3ab4-7a95-4cf9-bceb-f54aef6a4314)
+![Image](https://github.com/user-attachments/assets/59faa67c-92b5-477e-8685-272319945189)
+
+演示视频: https://github.com/user-attachments/assets/0eadfa92-dc6f-4e66-b709-1d919478a41c
 ## 更新点
 
 - 手动/自定义歌词编辑及候选资源搜索，支持本地缓存和远程来源。
@@ -18,15 +27,6 @@
 - 间奏动画的行间隔优化（#5）
 - 背景歌词模糊触摸保持模糊（issue #6）
 - 可选辅助功能：首次按上一首回到0:00
-
-
-傻瓜式 Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
-
-![Image](https://github.com/user-attachments/assets/266ed199-3763-4567-bfc3-3aa6fcd602f7)
-![Image](https://github.com/user-attachments/assets/7d7a3ab4-7a95-4cf9-bceb-f54aef6a4314)
-![Image](https://github.com/user-attachments/assets/59faa67c-92b5-477e-8685-272319945189)
-
-演示视频: https://github.com/user-attachments/assets/0eadfa92-dc6f-4e66-b709-1d919478a41c
 
 ## 核心特性
 
