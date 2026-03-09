@@ -1,11 +1,11 @@
 > [!WARNING]
 > **v1.0 服务提示**
 >
-> 受限于技术原因，自选歌词可能有异常。建议优先使用 AMLL TTML DB，或使用 [Unilyric](https://github.com/apoint123/Unilyric) 预处理后导入。
+> 受限于技术原因，多源歌词检索可能有异常。建议优先使用 AMLL TTML DB，或使用 [Unilyric](https://github.com/apoint123/Unilyric) 预处理后导入。
 
 # AMLL DroidMate
 
-Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
+傻瓜式 Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
 
 ![Image](https://github.com/user-attachments/assets/266ed199-3763-4567-bfc3-3aa6fcd602f7)
 ![Image](https://github.com/user-attachments/assets/7d7a3ab4-7a95-4cf9-bceb-f54aef6a4314)
