@@ -525,8 +525,10 @@ window.updateLyrics = function (lyricsPayload) {
     state.lyricLines = normalizeLyricLines(rawLines)
 
     if (player) {
-      callPlayer('setLyricLines', state.lyricLines, Math.trunc(state.currentTime))
-      callPlayer('setCurrentTime', Math.trunc(state.currentTime), true)
+      const currentTimeToUse = Math.trunc(state.currentTime)
+      logToAndroid(`[AMLL-INFO] Updating lyrics with currentTime=${currentTimeToUse}ms`)
+      callPlayer('setLyricLines', state.lyricLines, currentTimeToUse)
+      callPlayer('setCurrentTime', currentTimeToUse, true)
       callPlayer('update', 0)
       logToAndroid(`[AMLL-SUCCESS] Updated player with ${state.lyricLines.length} lines`)
     }

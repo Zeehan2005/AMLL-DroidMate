@@ -198,6 +198,11 @@ fun AMLLLyricsView(
                 lastBackgroundProfileValue = backgroundProfile
             }
 
+            // 先更新时间，确保 JS 层的 state.currentTime 是正确的，然后再更新歌词
+            // 这样可以避免在间奏/前奏/尾奏时切换全屏导致歌词位置重置的问题
+            Log.v(AMLL_LOG_TAG, "[$debugSource#$instanceId] Bridge call: updateTime($currentTime)")
+            view.evaluateJavascript("window.updateTime && window.updateTime($currentTime);", null)
+
             // 只在lyrics对象引用改变时才重新构建JSON（避免每秒都构建）
             if (lyrics !== lastLyrics) {
                 if (lyrics != null) {
@@ -238,9 +243,6 @@ fun AMLLLyricsView(
                 lastFontFamily = configuredFontFamily
                 lastFontFileUri = configuredFontUri
             }
-
-            Log.v(AMLL_LOG_TAG, "[$debugSource#$instanceId] Bridge call: updateTime($currentTime)")
-            view.evaluateJavascript("window.updateTime && window.updateTime($currentTime);", null)
         }
     )
 }
