@@ -36,6 +36,7 @@ data class UpdateCheckResult(
 
 private data class InstalledVersion(
     val raw: String,
+    val normalized: String,
     val stable: SemVer? = null,
     val previewInstant: Instant? = null
 )
@@ -99,9 +100,10 @@ object GitHubUpdateChecker {
                 )
 
             val hasUpdate = isRemoteNewer(installed, resolved)
+            val sameVersion = isSameVersion(installed, resolved)
             UpdateCheckResult(
                 hasUpdate = hasUpdate,
-                currentVersionName = currentVersionName,
+                currentVersionName = installed.normalized,
                 selectedChannel = channel,
                 resolvedReleaseTag = resolved.tagName,
                 resolvedReleaseUrl = resolved.htmlUrl,
@@ -109,6 +111,8 @@ object GitHubUpdateChecker {
                 resolvedPublishedAt = resolved.publishedAt,
                 reason = if (hasUpdate) {
                     "发现新版本"
+                } else if (sameVersion) {
+                    "已是最新版本，版本号是 ${resolved.tagName}"
                 } else {
                     "当前版本更领先，符合条件的版本是 ${resolved.tagName}"
                 }
@@ -166,6 +170,18 @@ object GitHubUpdateChecker {
         return false
     }
 
+    private fun isSameVersion(installed: InstalledVersion, remote: ReleaseCandidate): Boolean {
+        remote.stable?.let { remoteStable ->
+            return installed.stable == remoteStable
+        }
+
+        remote.previewInstant?.let { remotePreview ->
+            return installed.previewInstant == remotePreview
+        }
+
+        return false
+    }
+
     private fun toCandidate(dto: GitHubReleaseDto): ReleaseCandidate? {
         val published = dto.publishedAt?.let {
             runCatching { Instant.parse(it) }.getOrNull()
@@ -177,7 +193,7 @@ object GitHubUpdateChecker {
         if (stable == null && preview == null) return null
 
         return ReleaseCandidate(
-            tagName = tag,
+            tagName = normalizeVersionName(tag),
             isPrerelease = dto.prerelease,
             htmlUrl = dto.htmlUrl,
             notes = dto.body.orEmpty().trim(),
@@ -196,6 +212,7 @@ object GitHubUpdateChecker {
         val trimmed = versionName.trim()
         return InstalledVersion(
             raw = trimmed,
+            normalized = normalizeVersionName(trimmed),
             stable = parseStable(trimmed),
             previewInstant = parsePreview(trimmed)
         )
@@ -210,8 +227,7 @@ object GitHubUpdateChecker {
     }
 
     private fun parsePreview(input: String): Instant? {
-        val match = previewRegex.matchEntire(input.trim()) ?: return null
-        val raw = match.groupValues[1]
+        val raw = extractPreviewDigits(input) ?: return null
         val localDateTime = runCatching {
             LocalDateTime.parse(raw, previewFormatter)
         }.getOrNull() ?: return null
@@ -227,5 +243,17 @@ object GitHubUpdateChecker {
         val syntheticDay = (stable.patch.coerceIn(0, 27) + 1)
         return LocalDateTime.of(syntheticYear, syntheticMonth, syntheticDay, 0, 0)
             .toInstant(ZoneOffset.UTC)
+    }
+
+    private fun normalizeVersionName(input: String): String {
+        val trimmed = input.trim()
+        parseStable(trimmed)?.let { return it.toString() }
+        extractPreviewDigits(trimmed)?.let { return "Alpha $it" }
+        return trimmed
+    }
+
+    private fun extractPreviewDigits(input: String): String? {
+        val match = previewRegex.matchEntire(input.trim()) ?: return null
+        return match.groupValues[1]
     }
 }
