@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ContextWrapper
+import android.net.Uri
 import android.util.Log
 import android.provider.Settings
 import android.widget.Toast
@@ -110,6 +111,7 @@ import com.amll.droidmate.ui.CardClickAction
 import com.amll.droidmate.ui.CustomLyricsActivity
 import com.amll.droidmate.ui.LyricsCacheActivity
 import com.amll.droidmate.ui.viewmodel.MainViewModel
+import com.amll.droidmate.update.GitHubUpdateChecker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -150,6 +152,10 @@ fun MainScreen() {
     var webViewReloadKey by remember { mutableStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     var showOpenAppDialog by remember { mutableStateOf(false) }
+    var showAutoUpdateDialog by remember { mutableStateOf(false) }
+    var autoUpdateDialogTitle by remember { mutableStateOf("") }
+    var autoUpdateDialogMessage by remember { mutableStateOf("") }
+    var autoUpdateDialogUrl by remember { mutableStateOf<String?>(null) }
     val useDarkSystemIcons = !isLyricsFullscreen &&
         MaterialTheme.colorScheme.background.luminance() > 0.5f
 
@@ -190,6 +196,34 @@ fun MainScreen() {
 
     LaunchedEffect(Unit) {
         viewModel.refreshLyricNotification()
+    }
+
+    LaunchedEffect(Unit) {
+        if (!AppSettings.isAutoUpdateCheckEnabled(context)) return@LaunchedEffect
+
+        val now = System.currentTimeMillis()
+        val lastCheck = AppSettings.getLastUpdateCheckAt(context)
+        val oneDayMillis = 24L * 60 * 60 * 1000
+        if (now - lastCheck < oneDayMillis) return@LaunchedEffect
+
+        val updateChannel = AppSettings.getUpdateChannel(context)
+        val result = GitHubUpdateChecker.check(context, updateChannel)
+        AppSettings.setLastUpdateCheckAt(context, now)
+
+        if (result.hasUpdate) {
+            autoUpdateDialogTitle = "发现新版本: ${result.resolvedReleaseTag ?: "未知版本"}"
+            autoUpdateDialogMessage = buildString {
+                append("当前版本: ${result.currentVersionName}\n")
+                append("通道: ${if (updateChannel == com.amll.droidmate.ui.UpdateChannel.PREVIEW) "预览版" else "正式版"}\n\n")
+                if (!result.resolvedReleaseNotes.isNullOrBlank()) {
+                    append(result.resolvedReleaseNotes)
+                } else {
+                    append("暂无更新说明")
+                }
+            }
+            autoUpdateDialogUrl = result.resolvedReleaseUrl
+            showAutoUpdateDialog = true
+        }
     }
 
     LaunchedEffect(webViewReloadKey) {
@@ -310,6 +344,33 @@ fun MainScreen() {
                     dismissButton = {
                         TextButton(onClick = { showOpenAppDialog = false }) {
                             Text("不操作")
+                        }
+                    }
+                )
+            }
+
+            if (showAutoUpdateDialog) {
+                AlertDialog(
+                    onDismissRequest = { showAutoUpdateDialog = false },
+                    title = { Text(autoUpdateDialogTitle) },
+                    text = { Text(autoUpdateDialogMessage) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (!autoUpdateDialogUrl.isNullOrBlank()) {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(autoUpdateDialogUrl)))
+                                }
+                                showAutoUpdateDialog = false
+                            }
+                        ) {
+                            Text(if (!autoUpdateDialogUrl.isNullOrBlank()) "去更新" else "知道了")
+                        }
+                    },
+                    dismissButton = {
+                        if (!autoUpdateDialogUrl.isNullOrBlank()) {
+                            TextButton(onClick = { showAutoUpdateDialog = false }) {
+                                Text("稍后")
+                            }
                         }
                     }
                 )

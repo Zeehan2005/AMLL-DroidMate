@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -50,8 +52,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.amll.droidmate.ui.theme.DroidMateTheme
+import com.amll.droidmate.update.GitHubUpdateChecker
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +94,14 @@ private fun SettingsPage(
     var amllFontFamily by remember { mutableStateOf(AppSettings.getAmllFontFamily(context)) }
     var importedFontName by remember { mutableStateOf(AppSettings.getAmllFontFileName(context)) }
     var fontStatusMessage by remember { mutableStateOf<String?>(null) }
+    var autoCheckEnabled by remember { mutableStateOf(AppSettings.isAutoUpdateCheckEnabled(context)) }
+    var updateChannel by remember { mutableStateOf(AppSettings.getUpdateChannel(context)) }
+    var updateDialogTitle by remember { mutableStateOf("") }
+    var updateDialogMessage by remember { mutableStateOf("") }
+    var updateDialogUrl by remember { mutableStateOf<String?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val importFontLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -231,6 +245,101 @@ private fun SettingsPage(
             }
 
             Text(
+                text = "版本更新",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("当前版本: ${getCurrentVersionName(context)}")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth(0.75f)) {
+                            Text("自动检查更新")
+                            Text(
+                                text = "启动后按频率自动检查 GitHub Release",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                        Switch(
+                            checked = autoCheckEnabled,
+                            onCheckedChange = { enabled ->
+                                autoCheckEnabled = enabled
+                                AppSettings.setAutoUpdateCheckEnabled(context, enabled)
+                            }
+                        )
+                    }
+
+                    Text(
+                        text = "更新通道",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    CardClickActionOption(
+                        title = "正式版 (vX.Y.Z)",
+                        selected = updateChannel == UpdateChannel.STABLE,
+                        onClick = {
+                            updateChannel = UpdateChannel.STABLE
+                            AppSettings.setUpdateChannel(context, UpdateChannel.STABLE)
+                        }
+                    )
+                    CardClickActionOption(
+                        title = "预览版 (Alpha 时间戳)",
+                        selected = updateChannel == UpdateChannel.PREVIEW,
+                        onClick = {
+                            updateChannel = UpdateChannel.PREVIEW
+                            AppSettings.setUpdateChannel(context, UpdateChannel.PREVIEW)
+                        }
+                    )
+
+                    Button(
+                        onClick = {
+                            if (checkingUpdate) return@Button
+                            checkingUpdate = true
+                            scope.launch {
+                                val result = GitHubUpdateChecker.check(context, updateChannel)
+                                AppSettings.setLastUpdateCheckAt(context, System.currentTimeMillis())
+                                checkingUpdate = false
+
+                                if (result.hasUpdate) {
+                                    updateDialogTitle = "发现新版本: ${result.resolvedReleaseTag ?: "未知版本"}"
+                                    updateDialogMessage = buildString {
+                                        append("当前版本: ${result.currentVersionName}\n")
+                                        if (result.resolvedPublishedAt != null) {
+                                            append("发布时间: ${formatReleaseTime(result.resolvedPublishedAt)}\n\n")
+                                        }
+                                        if (!result.resolvedReleaseNotes.isNullOrBlank()) {
+                                            append(result.resolvedReleaseNotes)
+                                        } else {
+                                            append("暂无更新说明")
+                                        }
+                                    }
+                                    updateDialogUrl = result.resolvedReleaseUrl
+                                } else {
+                                    updateDialogTitle = "检查更新"
+                                    updateDialogMessage = result.reason ?: "当前已是最新版本"
+                                    updateDialogUrl = null
+                                }
+                                showUpdateDialog = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (checkingUpdate) "检查中..." else "检查更新")
+                    }
+                }
+            }
+
+            Text(
                 text = "项目与贡献",
                 style = MaterialTheme.typography.titleMedium
             )
@@ -272,6 +381,37 @@ private fun SettingsPage(
                     }
                 }
             }
+        }
+
+        if (showUpdateDialog) {
+            AlertDialog(
+                onDismissRequest = { showUpdateDialog = false },
+                title = { Text(updateDialogTitle) },
+                text = { Text(updateDialogMessage) },
+                confirmButton = {
+                    if (!updateDialogUrl.isNullOrBlank()) {
+                        TextButton(
+                            onClick = {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateDialogUrl)))
+                                showUpdateDialog = false
+                            }
+                        ) {
+                            Text("去更新")
+                        }
+                    } else {
+                        TextButton(onClick = { showUpdateDialog = false }) {
+                            Text("知道了")
+                        }
+                    }
+                },
+                dismissButton = {
+                    if (!updateDialogUrl.isNullOrBlank()) {
+                        TextButton(onClick = { showUpdateDialog = false }) {
+                            Text("稍后")
+                        }
+                    }
+                }
+            )
         }
     }
 }
@@ -315,6 +455,17 @@ private fun queryDisplayName(context: android.content.Context, uri: Uri): String
         }
     }
     return null
+}
+
+private fun formatReleaseTime(instant: java.time.Instant): String {
+    return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        .withZone(ZoneId.systemDefault())
+        .format(instant)
+}
+
+private fun getCurrentVersionName(context: android.content.Context): String {
+    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+    return packageInfo.versionName ?: "unknown"
 }
 
 private fun needsNotificationPermission(): Boolean {
