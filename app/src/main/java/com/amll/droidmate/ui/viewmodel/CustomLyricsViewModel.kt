@@ -10,6 +10,8 @@ import com.amll.droidmate.domain.model.LyricsSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 
 data class CustomLyricsCandidate(
@@ -23,6 +25,15 @@ data class CustomLyricsCandidate(
 )
 
 class CustomLyricsViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val providerPriority = mapOf(
+        "amll" to 0,
+        "kugou" to 1,
+        "netease" to 2,
+        "ncm" to 2,
+        "qq" to 3,
+        "qqmusic" to 3
+    )
 
     // HTTP Client（使用统一配置，缓存存储在 cache 目录）
     private val httpClient = HttpClientFactory.create(application.applicationContext)
@@ -50,10 +61,15 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             _isSearching.value = true
             _errorMessage.value = null
+            _candidates.value = emptyList()
+            val mutex = Mutex()
             try {
-                val results = lyricsRepository.searchLyrics(title, artist)
-                val candidates = buildCandidatesAsync(results)
-                _candidates.value = candidates
+                lyricsRepository.searchLyricsIncremental(title, artist) { result ->
+                    appendCandidate(
+                        candidate = result.toCandidate(),
+                        mutex = mutex
+                    )
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to search candidates")
                 _errorMessage.value = "搜索候选歌词失败: ${e.message}"
@@ -118,42 +134,31 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         _appliedLyricsText.value = null
     }
 
-    private suspend fun buildCandidatesAsync(results: List<LyricsSearchResult>): List<CustomLyricsCandidate> {
-        val candidates = mutableListOf<CustomLyricsCandidate>()
-        for (result in results) {
-            // 对于网易云结果，先检查 AMLL TTML DB 是否真的有歌词
-            if (result.provider == "netease") {
-                val amllResult = lyricsRepository.getLyrics("amll", result.songId, result.title, result.artist)
-                if (amllResult.isSuccess && amllResult.lyrics != null) {
-                    // AMLL TTML DB 有歌词，添加到候选列表
-                    candidates.add(
-                        CustomLyricsCandidate(
-                            provider = "amll",
-                            songId = result.songId,
-                            title = result.title,
-                            artist = result.artist,
-                            confidence = result.confidence,
-                            matchType = result.matchType,
-                            displayName = "AMLL TTML DB (置信度最高时推荐)"
-                        )
-                    )
-                }
-            }
+    private suspend fun appendCandidate(candidate: CustomLyricsCandidate, mutex: Mutex) {
+        mutex.withLock {
+            val key = "${candidate.provider.lowercase()}:${candidate.songId}"
+            val exists = _candidates.value.any { "${it.provider.lowercase()}:${it.songId}" == key }
+            if (exists) return
 
-            // 添加原始来源
-            candidates.add(
-                CustomLyricsCandidate(
-                    provider = result.provider,
-                    songId = result.songId,
-                    title = result.title,
-                    artist = result.artist,
-                    confidence = result.confidence,
-                    matchType = result.matchType,
-                    displayName = providerDisplayName(result.provider)
+            _candidates.value = (_candidates.value + candidate)
+                .sortedWith(
+                    compareBy<CustomLyricsCandidate> {
+                        providerPriority[it.provider.lowercase()] ?: Int.MAX_VALUE
+                    }.thenByDescending { it.confidence }
                 )
-            )
         }
-        return candidates
+    }
+
+    private fun LyricsSearchResult.toCandidate(): CustomLyricsCandidate {
+        return CustomLyricsCandidate(
+            provider = provider,
+            songId = songId,
+            title = title,
+            artist = artist,
+            confidence = confidence,
+            matchType = matchType,
+            displayName = providerDisplayName(provider)
+        )
     }
 
     private fun providerDisplayName(provider: String): String {

@@ -75,7 +75,14 @@ object UnifiedLyricsParser {
                 LyricsFormat.YRC -> {
                     val parsed = YrcParser.parse(content)
                     Timber.d("YRC parsed ${parsed.size} lines")
-                    parsed
+                    if (parsed.isEmpty()) {
+                        Timber.w("YRC parsing returned no lines, falling back to LRC parser")
+                        val lrcFallback = LrcParser.parse(content)
+                        Timber.d("LRC fallback parsed ${lrcFallback.size} lines")
+                        lrcFallback
+                    } else {
+                        parsed
+                    }
                 }
                 LyricsFormat.ENHANCED_LRC -> {
                     val parsed = EnhancedLrcParser.parse(content)

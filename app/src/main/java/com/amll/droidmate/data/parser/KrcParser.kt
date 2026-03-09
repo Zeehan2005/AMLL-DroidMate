@@ -2,7 +2,15 @@ package com.amll.droidmate.data.parser
 
 import com.amll.droidmate.domain.model.LyricLine
 import com.amll.droidmate.domain.model.LyricWord
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import timber.log.Timber
+import java.util.Base64
 
 /**
  * KRC 格式解析器（酷狗音乐逐字歌词格式）
@@ -24,6 +32,16 @@ object KrcParser {
     
     // KRC 逐字时间戳正则: <偏移ms,持续ms,0>文本
     private val SYLLABLE_REGEX = Regex("""<(\d+),(\d+),\d+>([^<]+)""")
+
+    // KRC 内嵌翻译/音译标签: [language:BASE64_JSON]
+    private val LANGUAGE_TAG_REGEX = Regex("""\[language:([A-Za-z0-9+/=]+)]""")
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private data class KrcAuxiliaryData(
+        val translations: List<String> = emptyList(),
+        val romanizations: List<String> = emptyList()
+    )
     
     /**
      * 解析 KRC 格式内容
@@ -31,6 +49,8 @@ object KrcParser {
     fun parse(content: String): List<LyricLine> {
         val lines = mutableListOf<LyricLine>()
         val contentLines = content.lines()
+        val auxiliaryData = extractAuxiliaryDataFromKrc(content)
+        var auxLineIndex = 0
         
         for ((index, lineStr) in contentLines.withIndex()) {
             val trimmed = lineStr.trim()
@@ -40,13 +60,70 @@ object KrcParser {
             if (isMetadataLine(trimmed)) continue
             
             try {
-                parseSingleLine(trimmed, index)?.let { lines.add(it) }
+                parseSingleLine(trimmed, index)?.let { parsedLine ->
+                    val translation = auxiliaryData.translations.getOrNull(auxLineIndex)
+                        ?.takeIf { it.isNotBlank() }
+                    val romanization = auxiliaryData.romanizations.getOrNull(auxLineIndex)
+                        ?.takeIf { it.isNotBlank() }
+
+                    lines.add(
+                        parsedLine.copy(
+                            translation = translation,
+                            transliteration = romanization
+                        )
+                    )
+                    auxLineIndex += 1
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Failed to parse KRC line $index: $trimmed")
             }
         }
         
         return lines
+    }
+
+    private fun extractAuxiliaryDataFromKrc(content: String): KrcAuxiliaryData {
+        val languageMatch = LANGUAGE_TAG_REGEX.find(content) ?: return KrcAuxiliaryData()
+        val encoded = languageMatch.groupValues.getOrNull(1).orEmpty()
+        if (encoded.isBlank()) return KrcAuxiliaryData()
+
+        return try {
+            val decodedBytes = Base64.getDecoder().decode(encoded)
+            val decodedText = String(decodedBytes, Charsets.UTF_8)
+            val root = json.parseToJsonElement(decodedText).jsonObject
+            val contentEntries = root["content"]?.jsonArray.orEmpty()
+
+            var translations = emptyList<String>()
+            var romanizations = emptyList<String>()
+
+            for (entry in contentEntries) {
+                val entryObj = entry as? JsonObject ?: continue
+                val type = entryObj["type"]?.jsonPrimitive?.intOrNull
+                    ?: entryObj["lyricType"]?.jsonPrimitive?.intOrNull
+                    ?: continue
+                val lyricContent = entryObj["lyricContent"] as? JsonArray ?: continue
+
+                val normalizedLines = lyricContent.map { lineNode ->
+                    val parts = (lineNode as? JsonArray)
+                        ?.mapNotNull { runCatching { it.jsonPrimitive.content }.getOrNull() }
+                        .orEmpty()
+                    parts.joinToString(separator = "").trim()
+                }
+
+                when (type) {
+                    1 -> translations = normalizedLines
+                    0 -> romanizations = normalizedLines
+                }
+            }
+
+            KrcAuxiliaryData(
+                translations = translations,
+                romanizations = romanizations
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to parse KRC [language] auxiliary data")
+            KrcAuxiliaryData()
+        }
     }
     
     /**

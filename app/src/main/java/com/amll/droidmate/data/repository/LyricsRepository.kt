@@ -15,6 +15,9 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 import java.net.UnknownHostException
 import timber.log.Timber
@@ -382,7 +385,6 @@ class LyricsRepository(private val httpClient: HttpClient) {
         return try {
             val keyword = "$title $artist".trim()
             Timber.d("Netease search starting for keyword: $keyword")
-            Timber.d("  Search terms - Title: '$title' | Artist: '$artist'")
 
             val payload = buildJsonObject {
                 put("s", keyword)
@@ -402,70 +404,36 @@ class LyricsRepository(private val httpClient: HttpClient) {
                     append("params", encryptedParams)
                 }))
             }
-            
+
             if (!response.status.isSuccess()) {
                 Timber.w("Netease search failed: ${response.status}")
                 return null
             }
-            
-            val json = Json { ignoreUnknownKeys = true }
-            val responseBody = response.body<String>()
-            Timber.d("Netease search response (first 1000 chars): ${responseBody.take(1000)}")
-            
-            val responseJson = json.parseToJsonElement(responseBody).jsonObject
+
+            val responseJson = Json.parseToJsonElement(response.body<String>()).jsonObject
             val code = responseJson["code"]?.jsonPrimitive?.intOrNull
-            Timber.d("Netease search response code: $code")
-            
-            if (code != null && code != 200) {
-                Timber.w("Netease search returned non-200 code: $code")
-                return null
-            }
-            
-            // 解析搜索结果
-            val songList = responseJson["result"]
-                ?.jsonObject?.get("songs")
-                ?.jsonArray
-            
-            Timber.d("Netease search found ${songList?.size ?: 0} song candidates")
-            
-            if (songList.isNullOrEmpty()) {
-                Timber.w("No Netease results found for: $keyword")
-                return null
-            }
-            
-            // 遍历所有候选，找到最佳匹配（对齐 Unilyric 逻辑）
+            if (code != null && code != 200) return null
+
+            val songList = responseJson["result"]?.jsonObject?.get("songs")?.jsonArray
+            if (songList.isNullOrEmpty()) return null
+
             var bestMatch: LyricsSearchResult? = null
             var bestScore = -1
-            var evaluatedCount = 0
-            
-            for ((index, songElement) in songList.withIndex()) {
+
+            for (songElement in songList) {
                 val song = songElement.jsonObject
-                val songId = song["id"]?.jsonPrimitive?.long?.toString()
-                val songTitle = song["name"]?.jsonPrimitive?.content
-                // 网易云 cloudsearch 通常使用 ar/al/dt；保留 artists/album/duration 兼容旧结构
-                val artistArray = song["ar"]?.jsonArray ?: song["artists"]?.jsonArray
-                val singerName = artistArray
-                    ?.mapNotNull { artistElement ->
-                        artistElement.jsonObject["name"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
-                    }
+                val songId = song["id"]?.jsonPrimitive?.long?.toString() ?: continue
+                val songTitle = song["name"]?.jsonPrimitive?.content ?: continue
+                val singerName = (song["ar"]?.jsonArray ?: song["artists"]?.jsonArray)
+                    ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content?.trim()?.takeIf { n -> n.isNotEmpty() } }
                     ?.joinToString(", ")
                     ?.takeIf { it.isNotBlank() }
+                    ?: continue
                 val albumName = song["al"]?.jsonObject?.get("name")?.jsonPrimitive?.content
                     ?: song["album"]?.jsonObject?.get("name")?.jsonPrimitive?.content
                 val durationMs = song["dt"]?.jsonPrimitive?.longOrNull
                     ?: song["duration"]?.jsonPrimitive?.longOrNull
-                
-                // 检查必要字段
-                if (songId == null || songTitle == null || singerName == null) {
-                    Timber.d("Candidate #$index: Missing required fields (id=$songId, title=$songTitle, artist=$singerName)")
-                    Timber.d("  -> Available keys: ${song.keys}")
-                    continue
-                }
-                
-                evaluatedCount++
-                Timber.d("Candidate #$index: '$songTitle' - '$singerName' (id=$songId, duration=${durationMs}ms)")
-                
-                // 计算匹配度
+
                 val matchEval = evaluateMatch(
                     searchTitle = title,
                     searchArtist = artist,
@@ -475,14 +443,8 @@ class LyricsRepository(private val httpClient: HttpClient) {
                     resultDurationMs = durationMs
                 )
                 val matchType = MatchType.valueOf(matchEval.matchType)
-                
-                Timber.d("  -> Evaluation: matchType=${matchEval.matchType}(score=${matchType.score}), confidence=${matchEval.confidence}")
-                
-                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
-                if (matchType.score < MatchType.VERY_LOW.score) {
-                    Timber.d("  -> Score ${matchType.score} is BELOW threshold ${MatchType.VERY_LOW.score}, skipping")
-                } else if (matchType.score > bestScore) {
-                    val previousBest = bestScore
+
+                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
                     bestScore = matchType.score
                     bestMatch = LyricsSearchResult(
                         provider = "netease",
@@ -492,23 +454,31 @@ class LyricsRepository(private val httpClient: HttpClient) {
                         confidence = matchEval.confidence,
                         matchType = matchEval.matchType
                     )
-                    Timber.d("  -> New best match found! (was $previousBest, now $bestScore)")
-                } else {
-                    Timber.d("  -> Score ${matchType.score} is NOT better than best ${bestScore}, skipping")
                 }
             }
-            
-            Timber.d("Netease search evaluation complete: evaluated $evaluatedCount / ${songList.size} candidates")
-            
-            if (bestMatch != null) {
-                Timber.i("Found Netease best match: ${bestMatch.title} - ${bestMatch.artist} (id: ${bestMatch.songId}, confidence: ${bestMatch.confidence})")
-            } else {
-                Timber.w("No qualifying Netease match found for: $keyword (tried ${songList.size} candidates, detailed ${evaluatedCount} with required fields)")
-            }
-            
+
             bestMatch
         } catch (e: Exception) {
             Timber.e(e, "Error searching Netease")
+            null
+        }
+    }
+
+    /**
+     * AMLL 轻量搜索：通过网易云候选 ID 探测 AMLL 是否存在，避免本地索引匹配造成卡顿。
+     */
+    suspend fun searchAMLL(title: String, artist: String): LyricsSearchResult? {
+        return try {
+            val neteaseCandidate = searchNetease(title, artist) ?: return null
+            val amllLyrics = getAMLL_TTMLLyrics(neteaseCandidate.songId) ?: return null
+            neteaseCandidate.copy(
+                provider = "amll",
+                title = amllLyrics.metadata.title.takeIf { it.isNotBlank() } ?: neteaseCandidate.title,
+                artist = amllLyrics.metadata.artist.takeIf { it.isNotBlank() } ?: neteaseCandidate.artist,
+                album = amllLyrics.metadata.album ?: neteaseCandidate.album
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Error searching AMLL")
             null
         }
     }
@@ -618,14 +588,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 artist = artist ?: "Unknown"
             ) ?: return null
 
-            val translationLines = translationContent
-                ?.takeIf { it.isNotBlank() }
-                ?.let { com.amll.droidmate.data.parser.LrcParser.parse(it) }
-            val romanizationLines = transliterationContent
-                ?.takeIf { it.isNotBlank() }
-                ?.let { com.amll.droidmate.data.parser.LrcParser.parse(it) }
-
-            val mergedLines = mergeLyricLines(mainLyrics.lines, translationLines, romanizationLines)
+            val mergedLines = mergeNeteaseAuxiliaryLines(
+                mainLines = mainLyrics.lines,
+                translationContent = translationContent,
+                transliterationContent = transliterationContent
+            )
             val result = mainLyrics.copy(lines = mergedLines)
             
             Timber.i("Successfully fetched Netease lyrics for: $songId")
@@ -1231,6 +1198,60 @@ class LyricsRepository(private val httpClient: HttpClient) {
         return if (delta <= 800L) nearest.value else null
     }
 
+    private fun mergeNeteaseAuxiliaryLines(
+        mainLines: List<LyricLine>,
+        translationContent: String?,
+        transliterationContent: String?
+    ): List<LyricLine> {
+        val translationLines = translationContent
+            ?.takeIf { it.isNotBlank() }
+            ?.let { com.amll.droidmate.data.parser.LrcParser.parse(it) }
+        val romanizationLines = transliterationContent
+            ?.takeIf { it.isNotBlank() }
+            ?.let { com.amll.droidmate.data.parser.LrcParser.parse(it) }
+
+        val strictMerged = mergeLyricLines(mainLines, translationLines, romanizationLines)
+
+        val translationMap = parseTimedLRCMap(translationContent)
+        val romanizationMap = parseTimedLRCMap(transliterationContent)
+
+        val beforeTranslation = strictMerged.count { !it.translation.isNullOrBlank() }
+        val beforeRomanization = strictMerged.count { !it.transliteration.isNullOrBlank() }
+
+        val completed = strictMerged.map { line ->
+            val nearestTranslation = if (line.translation.isNullOrBlank()) {
+                findNearestTimedText(translationMap, line.startTime)
+                    ?.let(::decodeCommonEntities)
+                    ?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+
+            val nearestRomanization = if (line.transliteration.isNullOrBlank()) {
+                findNearestTimedText(romanizationMap, line.startTime)
+                    ?.let(::decodeCommonEntities)
+                    ?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+
+            line.copy(
+                translation = line.translation ?: nearestTranslation,
+                transliteration = line.transliteration ?: nearestRomanization
+            )
+        }
+
+        val afterTranslation = completed.count { !it.translation.isNullOrBlank() }
+        val afterRomanization = completed.count { !it.transliteration.isNullOrBlank() }
+        if (afterTranslation > beforeTranslation || afterRomanization > beforeRomanization) {
+            Timber.d(
+                "Netease nearest-time fallback filled lines: translation $beforeTranslation->$afterTranslation, romanization $beforeRomanization->$afterRomanization"
+            )
+        }
+
+        return completed
+    }
+
     private fun decodeCommonEntities(text: String): String {
         return text
             .replace("&nbsp;", " ")
@@ -1305,62 +1326,77 @@ class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchLyrics(
         title: String,
         artist: String
+    ): List<LyricsSearchResult> = searchLyricsIncremental(title, artist) { }
+
+    /**
+     * 增量搜索歌词：某个来源先返回就先通知上层，避免 UI 必须等待全部来源结束。
+     */
+    suspend fun searchLyricsIncremental(
+        title: String,
+        artist: String,
+        onResult: suspend (LyricsSearchResult) -> Unit
     ): List<LyricsSearchResult> = coroutineScope {
         Timber.i("Starting multi-source parallel lyrics search for: $title - $artist")
-        
-        // 并行搜索所有平台（对齐 Unilyric 的优化）
-        val qqMusicDeferred = async { 
-            Timber.d("QQ Music search starting...")
-            runCatching { searchQQMusic(title, artist) }.getOrNull().also { result ->
-                Timber.d("QQ Music search completed: ${if (result != null) "found" else "null"}")
-            }
-        }
-        val kugouDeferred = async { 
-            Timber.d("Kugou search starting...")
-            runCatching { searchKugou(title, artist) }.getOrNull().also { result ->
-                Timber.d("Kugou search completed: ${if (result != null) "found (${result.title} - ${result.artist})" else "null"}")
-            }
-        }
-        val neteaseDeferred = async { 
-            Timber.d("Netease search starting...")
-            runCatching { searchNetease(title, artist) }.getOrNull().also { result ->
-                Timber.d("Netease search completed: ${if (result != null) "found" else "null"}")
-            }
-        }
-        
-        // 等待所有搜索完成
+
         val results = mutableListOf<LyricsSearchResult>()
-        
-        val qqResult = qqMusicDeferred.await()
-        Timber.d("QQ Music await result: $qqResult")
-        qqResult?.let { 
-            results.add(it)
-            Timber.d("Added QQ Music result with confidence: ${it.confidence}")
-        }
-        
-        val kugouResult = kugouDeferred.await()
-        Timber.d("Kugou await result: $kugouResult")
-        kugouResult?.let { 
-            results.add(it)
-            Timber.d("Added Kugou result with confidence: ${it.confidence}")
-        }
-        
-        val neteaseResult = neteaseDeferred.await()
-        Timber.d("Netease await result: $neteaseResult")
-        neteaseResult?.let {
-            results.add(it)
-            Timber.d("Added Netease result with confidence: ${it.confidence}")
+        val dedupKeys = mutableSetOf<String>()
+        val mutex = Mutex()
+
+        suspend fun tryPublish(result: LyricsSearchResult?) {
+            if (result == null) return
+            val isNew = mutex.withLock {
+                val key = "${result.provider.lowercase()}:${result.songId}"
+                if (!dedupKeys.add(key)) {
+                    false
+                } else {
+                    results.add(result)
+                    true
+                }
+            }
+            if (isNew) {
+                Timber.d("Incremental search result: ${result.provider}(${result.confidence}) ${result.title} - ${result.artist}")
+                onResult(result)
+            }
         }
 
-        // 统一按匹配度降序排序，去重(provider + songId)
-        val sortedResults = results
-            .sortedByDescending { it.confidence }
-            .distinctBy { "${it.provider.lowercase()}:${it.songId}" }
+        val amllJob = launch {
+            Timber.d("AMLL search starting...")
+            val result = runCatching { searchAMLL(title, artist) }.getOrNull()
+            Timber.d("AMLL search completed: ${if (result != null) "found" else "null"}")
+            tryPublish(result)
+        }
+
+        val qqMusicJob = launch {
+            Timber.d("QQ Music search starting...")
+            val result = runCatching { searchQQMusic(title, artist) }.getOrNull()
+            Timber.d("QQ Music search completed: ${if (result != null) "found" else "null"}")
+            tryPublish(result)
+        }
+
+        val kugouJob = launch {
+            Timber.d("Kugou search starting...")
+            val result = runCatching { searchKugou(title, artist) }.getOrNull()
+            Timber.d("Kugou search completed: ${if (result != null) "found (${result.title} - ${result.artist})" else "null"}")
+            tryPublish(result)
+        }
+
+        val neteaseJob = launch {
+            Timber.d("Netease search starting...")
+            val result = runCatching { searchNetease(title, artist) }.getOrNull()
+            Timber.d("Netease search completed: ${if (result != null) "found" else "null"}")
+            tryPublish(result)
+        }
+
+        amllJob.join()
+        qqMusicJob.join()
+        kugouJob.join()
+        neteaseJob.join()
+
+        val sortedResults = results.sortedByDescending { it.confidence }
 
         Timber.i("Search completed: Found ${results.size} total results, ${sortedResults.size} after dedup")
-        Timber.i("Results before sort: ${results.map { "${it.provider.uppercase()}(${it.confidence})" }}")
         Timber.i("Results after sort: ${sortedResults.map { "${it.provider.uppercase()}(${it.confidence})" }}")
-        
+
         sortedResults
     }
     
@@ -1386,44 +1422,48 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 )
             }
             
-            // 2. 先尝试 AMLL（仅针对高匹配的网易云候选，近似 Unilyric 的 PrettyHigh 门槛）
-            val highConfidenceNeteaseCandidates = searchResults.filter {
-                it.provider.equals("netease", ignoreCase = true) &&
-                    (it.matchType == "PERFECT" ||
-                        it.matchType == "VERY_HIGH" ||
-                        it.matchType == "HIGH" ||
-                        it.matchType == "PRETTY_HIGH")
-            }
-            for (neteaseResult in highConfidenceNeteaseCandidates) {
-                Timber.d("Trying AMLL TTML DB first for high-confidence Netease ID: ${neteaseResult.songId}")
-                val amllLyrics = getAMLL_TTMLLyrics(neteaseResult.songId)
+            // 2. 先尝试 AMLL DB（只要有网易云候选就尝试，成功即优先使用）
+            val amllCandidates = searchResults
+                .filter { it.provider.equals("amll", ignoreCase = true) }
+                .sortedByDescending { it.confidence }
+
+            for (amllResult in amllCandidates) {
+                Timber.d("Trying AMLL TTML DB with candidate ID: ${amllResult.songId}")
+                val amllLyrics = getAMLL_TTMLLyrics(amllResult.songId)
                 if (amllLyrics != null) {
                     Timber.i("Successfully fetched from AMLL TTML DB")
                     return LyricsResult(
                         isSuccess = true,
                         lyrics = amllLyrics,
-                        source = "AMLL TTML DB (网易云 ${neteaseResult.songId})"
+                        source = "AMLL TTML DB (网易云 ${amllResult.songId})"
                     )
                 }
             }
 
-            // 3. 按候选排序顺序逐个尝试直连来源（对齐 Unilyric comprehensive 的逐候选尝试）
-            for (result in searchResults) {
-                Timber.d("Trying ${result.provider} with ID: ${result.songId}")
-                val lyrics = when (result.provider) {
-                    "netease" -> getNeteaseLyrics(result.songId, result.title, result.artist)
-                    "qq" -> getQQMusicLyrics(result.songId, result.title, result.artist)
-                    "kugou" -> getKugouLyrics(result.songId, result.title, result.artist)
-                    else -> null
-                }
-                
-                if (lyrics != null) {
-                    Timber.i("Successfully fetched from ${result.provider}")
-                    return LyricsResult(
-                        isSuccess = true,
-                        lyrics = lyrics,
-                        source = "${result.provider.uppercase()} (${result.title} - ${result.artist})"
-                    )
+            // 3. 按固定来源优先级尝试：酷狗 -> 网易云 -> QQ音乐
+            val providerPriority = listOf("kugou", "netease", "qq")
+            for (provider in providerPriority) {
+                val providerCandidates = searchResults
+                    .filter { it.provider.equals(provider, ignoreCase = true) }
+                    .sortedByDescending { it.confidence }
+
+                for (result in providerCandidates) {
+                    Timber.d("Trying $provider with ID: ${result.songId}")
+                    val lyrics = when (provider) {
+                        "kugou" -> getKugouLyrics(result.songId, result.title, result.artist)
+                        "netease" -> getNeteaseLyrics(result.songId, result.title, result.artist)
+                        "qq" -> getQQMusicLyrics(result.songId, result.title, result.artist)
+                        else -> null
+                    }
+
+                    if (lyrics != null) {
+                        Timber.i("Successfully fetched from $provider")
+                        return LyricsResult(
+                            isSuccess = true,
+                            lyrics = lyrics,
+                            source = "${provider.uppercase()} (${result.title} - ${result.artist})"
+                        )
+                    }
                 }
             }
             

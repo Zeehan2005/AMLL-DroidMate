@@ -183,31 +183,47 @@ private fun CustomLyricsPage(
             }
 
             Text(
-                text = "候选歌词（按置信度）",
+                text = "候选歌词",
                 style = MaterialTheme.typography.titleMedium
             )
 
-            if (isSearching) {
+            if (isSearching && candidates.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.Start
                 ) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                    Text(
+                        text = "正在搜索更多候选...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(candidates) { candidate ->
-                        CandidateItem(
-                            candidate = candidate,
-                            isApplying = isApplying,
-                            onUse = { viewModel.applyCandidate(candidate) }
-                        )
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (isSearching && candidates.isEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
                     }
+                }
+
+                items(candidates) { candidate ->
+                    CandidateItem(
+                        candidate = candidate,
+                        isApplying = isApplying,
+                        onUse = { viewModel.applyCandidate(candidate) }
+                    )
                 }
             }
 
