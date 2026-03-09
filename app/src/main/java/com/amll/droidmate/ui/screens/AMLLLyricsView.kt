@@ -70,8 +70,7 @@ fun AMLLLyricsView(
     var lastLyrics by remember { mutableStateOf<TTMLLyrics?>(null) }
     var lastLyricsPayload by remember { mutableStateOf<String?>(null) }
     var lastAlbumArtUri by remember { mutableStateOf<String?>(null) }
-    var lastFontFamily by remember { mutableStateOf<String?>(null) }
-    var lastFontFileUri by remember { mutableStateOf<String?>(null) }
+    var lastFontConfigSignature by remember { mutableStateOf<String?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -93,8 +92,7 @@ fun AMLLLyricsView(
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
-                        lastFontFamily = null
-                        lastFontFileUri = null
+                        lastFontConfigSignature = null
                         amllDebug("[$debugSource#$instanceId] WebView page started: $url")
                     }
 
@@ -106,8 +104,7 @@ fun AMLLLyricsView(
                         lastLyrics = null
                         lastLyricsPayload = null
                         lastAlbumArtUri = null
-                        lastFontFamily = null
-                        lastFontFileUri = null
+                        lastFontConfigSignature = null
                         // 确保页面加载后背景仍然透明
                         view.setBackgroundColor(Color.TRANSPARENT)
                         amllDebug("[$debugSource#$instanceId] WebView page finished: $url")
@@ -224,27 +221,133 @@ fun AMLLLyricsView(
             }
 
             val configuredFontFamily = AppSettings.getAmllFontFamily(view.context)
-            val configuredFontPath = AppSettings.getAmllFontFilePath(view.context)
-            val configuredFontUri = configuredFontPath
-                ?.takeIf { it.isNotBlank() }
-                ?.let { File(it) }
-                ?.takeIf { it.exists() }
-                ?.toURI()
-                ?.toString()
+            val fontFiles = AppSettings.getAmllFontFiles(view.context)
+                .filter { it.absolutePath.isNotBlank() }
+                .mapNotNull { item ->
+                    val file = File(item.absolutePath)
+                    if (!file.exists()) return@mapNotNull null
+                    FontWebEntry(
+                        id = item.id,
+                        sortKey = item.fontFamilyName,
+                        familyName = buildRuntimeFontFamilyName(item.fontFamilyName, item.id),
+                        uri = file.toURI().toString()
+                    )
+                }
 
-            if (lastFontFamily != configuredFontFamily || lastFontFileUri != configuredFontUri) {
-                val escapedFamily = escapeJsString(configuredFontFamily)
-                val escapedUri = escapeJsString(configuredFontUri ?: "")
-                amllDebug("[$debugSource#$instanceId] Bridge call: setFontSettings(customFile=${if (configuredFontUri.isNullOrBlank()) "none" else "present"})")
-                view.evaluateJavascript(
-                    "window.setFontSettings && window.setFontSettings(\"$escapedFamily\", \"$escapedUri\");",
-                    null
+            val enabledIds = AppSettings.getEnabledAmllFontFileIds(view.context)
+            val preferredOrder = parsePreferredFontOrder(configuredFontFamily)
+            val enabledFamilies = fontFiles
+                .filter { enabledIds.contains(it.id) }
+                .sortedWith(
+                    compareBy<FontWebEntry> { fontSortPriority(it.sortKey, preferredOrder) }
+                        .thenBy { it.sortKey.lowercase() }
+                        .thenBy { it.id }
                 )
-                lastFontFamily = configuredFontFamily
-                lastFontFileUri = configuredFontUri
+                .map { it.familyName }
+                .distinct()
+
+            val effectiveFamily = if (enabledFamilies.isNotEmpty()) {
+                val enabledStack = enabledFamilies.joinToString(", ") { "\"$it\"" }
+                "$enabledStack, $configuredFontFamily"
+            } else {
+                configuredFontFamily
+            }
+
+            val fontSignature = buildString {
+                append(effectiveFamily)
+                append("|")
+                append(fontFiles.joinToString(";") { "${it.id}:${it.familyName}:${it.uri}" })
+                append("|")
+                append(enabledFamilies.joinToString(","))
+            }
+
+            if (lastFontConfigSignature != fontSignature) {
+                val script = buildApplyFontScript(effectiveFamily, fontFiles)
+                amllDebug(
+                    "[$debugSource#$instanceId] Bridge call: applyFontSettings(enabled=${enabledFamilies.size}, files=${fontFiles.size})"
+                )
+                view.evaluateJavascript(script, null)
+                lastFontConfigSignature = fontSignature
             }
         }
     )
+}
+
+private data class FontWebEntry(
+    val id: String,
+    val sortKey: String,
+    val familyName: String,
+    val uri: String
+)
+
+private fun buildRuntimeFontFamilyName(baseFamilyName: String, fontId: String): String {
+    val base = baseFamilyName
+        .replace(Regex("[^A-Za-z0-9_-]"), "_")
+        .ifBlank { "AMLL_FONT" }
+    return "${base}_$fontId"
+}
+
+private fun parsePreferredFontOrder(configuredFontFamily: String): List<String> {
+    return configuredFontFamily
+        .split(',')
+        .map { normalizeFontToken(it) }
+        .filter { it.isNotBlank() }
+}
+
+private fun fontSortPriority(sortKey: String, preferredOrder: List<String>): Int {
+    if (preferredOrder.isEmpty()) return Int.MAX_VALUE
+    val normalizedSortKey = normalizeFontToken(sortKey)
+    for (index in preferredOrder.indices) {
+        val preferred = preferredOrder[index]
+        if (preferred.isBlank()) continue
+        if (normalizedSortKey.contains(preferred) || preferred.contains(normalizedSortKey)) {
+            return index
+        }
+    }
+    return Int.MAX_VALUE
+}
+
+private fun normalizeFontToken(value: String): String {
+    return value
+        .lowercase()
+        .replace(Regex("[^a-z0-9]"), "")
+}
+
+private fun buildApplyFontScript(effectiveFamily: String, files: List<FontWebEntry>): String {
+    val escapedFamily = escapeJsString(effectiveFamily)
+    val filesJs = files.joinToString(",") {
+        "{id:\"${escapeJsString(it.id)}\",familyName:\"${escapeJsString(it.familyName)}\",uri:\"${escapeJsString(it.uri)}\"}"
+    }
+
+    return """
+        (function() {
+            var effectiveFamily = "$escapedFamily";
+            var files = [$filesJs];
+            var styleId = 'amll-dynamic-font-face-style';
+            var styleNode = document.getElementById(styleId);
+            if (!styleNode) {
+                styleNode = document.createElement('style');
+                styleNode.id = styleId;
+                document.head.appendChild(styleNode);
+            }
+
+            var css = '';
+            for (var i = 0; i < files.length; i += 1) {
+                var item = files[i];
+                if (!item || !item.familyName || !item.uri) continue;
+                css += '@font-face{font-family:"' + item.familyName + '";src:url("' + item.uri + '");font-display:swap;}';
+            }
+            styleNode.textContent = css;
+
+            document.documentElement.style.setProperty('--amll-user-font-family', effectiveFamily);
+            document.documentElement.style.setProperty('--amll-lp-font-family', 'var(--amll-user-font-family)');
+
+            var players = document.querySelectorAll('.amll-lyric-player');
+            for (var j = 0; j < players.length; j += 1) {
+                players[j].style.fontFamily = 'var(--amll-lp-font-family)';
+            }
+        })();
+    """.trimIndent().replace("\n", " ")
 }
 
 private fun escapeJsString(value: String): String {

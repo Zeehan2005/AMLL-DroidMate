@@ -4,6 +4,8 @@ import '@applemusic-like-lyrics/core/style.css'
 const PLAYER_BACKGROUND = 'transparent'
 const SEEK_THRESHOLD_MS = 900
 const SEEK_HOLD_MS = 180
+const DEFAULT_FONT_STACK = '"SF Pro Display", "PingFang SC", system-ui, -apple-system, "Segoe UI", sans-serif'
+const DYNAMIC_FONT_STYLE_ID = 'amll-dynamic-font-face-style'
 
 const QUALITY_PROFILE = {
   alignAnchor: 'center',
@@ -382,7 +384,8 @@ function applyPlayerStyle(element) {
   element.style.background = PLAYER_BACKGROUND
   element.style.mixBlendMode = 'plus-lighter'
   element.style.color = '#f5f7ff'
-  element.style.fontFamily = '"SF Pro Display", "PingFang SC", system-ui, -apple-system, "Segoe UI", sans-serif'
+  element.style.setProperty('--amll-lp-font-family', `var(--amll-user-font-family, ${DEFAULT_FONT_STACK})`)
+  element.style.fontFamily = 'var(--amll-lp-font-family)'
   element.style.fontWeight = '700'
   element.style.setProperty('--amll-lp-color', '#f5f7ff')
   element.style.setProperty('--amll-lp-bg-color', 'rgba(0, 0, 0, 0.28)')
@@ -391,6 +394,49 @@ function applyPlayerStyle(element) {
 
   // 触摸导致全局去模糊时，仅对背景歌词加回固定模糊，主歌词保持清晰
   element.style.setProperty('--amll-touch-bg-blur', '10px')
+}
+
+function escapeCssString(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function setFontSettings(fontFamily, activeFontFamilyNames = [], fontFiles = []) {
+  const fallbackFamily = String(fontFamily || DEFAULT_FONT_STACK)
+  const enabledFamilies = (Array.isArray(activeFontFamilyNames)
+    ? activeFontFamilyNames
+    : [activeFontFamilyNames]
+  )
+    .map((name) => String(name || '').trim())
+    .filter((name) => name.length > 0)
+    .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+
+  const effectiveFamily = enabledFamilies.length > 0
+    ? `${enabledFamilies.map((name) => `"${name}"`).join(', ')}, ${fallbackFamily}`
+    : fallbackFamily
+
+  let styleTag = document.getElementById(DYNAMIC_FONT_STYLE_ID)
+  if (!styleTag) {
+    styleTag = document.createElement('style')
+    styleTag.id = DYNAMIC_FONT_STYLE_ID
+    document.head.appendChild(styleTag)
+  }
+
+  const css = (Array.isArray(fontFiles) ? fontFiles : [])
+    .filter((item) => item && item.familyName && item.uri)
+    .map((item) => `@font-face{font-family:"${escapeCssString(item.familyName)}";src:url("${escapeCssString(item.uri)}");font-display:swap;}`)
+    .join('')
+  styleTag.textContent = css
+
+  document.documentElement.style.setProperty('--amll-user-font-family', effectiveFamily)
+  document.documentElement.style.setProperty('--amll-lp-font-family', 'var(--amll-user-font-family)')
+
+  if (player) {
+    const el = player.getElement?.()
+    if (el) {
+      el.style.setProperty('--amll-lp-font-family', 'var(--amll-user-font-family)')
+      el.style.fontFamily = 'var(--amll-lp-font-family)'
+    }
+  }
 }
 
 function animationFrameLoop() {
@@ -653,6 +699,8 @@ window.configureBackgroundEffect = function (options) {
 window.logFromKotlin = function (message) {
   logToAndroid(`[JS] ${message}`)
 }
+
+window.setFontSettings = setFontSettings
 
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.style.background = 'transparent'
