@@ -182,10 +182,12 @@ fun MainScreen() {
             if (lyricsText.isNotBlank()) {
                 val fallbackTitle = nowPlaying?.title ?: "自选歌词"
                 val fallbackArtist = nowPlaying?.artist ?: "Unknown"
+                val source = data?.getStringExtra(CustomLyricsActivity.EXTRA_SOURCE) ?: "manual"
                 viewModel.applyCustomLyricsInput(
                     content = lyricsText,
                     title = if (title.isNotBlank()) title else fallbackTitle,
-                    artist = if (artist.isNotBlank()) artist else fallbackArtist
+                    artist = if (artist.isNotBlank()) artist else fallbackArtist,
+                    source = source
                 )
             }
         }

@@ -1,5 +1,8 @@
 package com.amll.droidmate.ui.viewmodel
 
+
+
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,7 +29,11 @@ data class CustomLyricsCandidate(
 
 class CustomLyricsViewModel(application: Application) : AndroidViewModel(application) {
 
+    // 当前歌曲唯一标识（title + artist）
+    private var currentSongKey: String? = null
+
     private val providerPriority = mapOf(
+        "cache" to -1,   // 本地缓存最高优先级
         "amll" to 0,
         "kugou" to 1,
         "netease" to 2,
@@ -56,8 +63,16 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     private val _appliedLyricsText = MutableStateFlow<String?>(null)
     val appliedLyricsText: StateFlow<String?> = _appliedLyricsText
 
+    // tag the origin of the applied lyrics so the caller can distinguish manual vs candidate
+    private val _appliedLyricsSource = MutableStateFlow<String?>(null)
+    val appliedLyricsSource: StateFlow<String?> = _appliedLyricsSource
+
     fun searchCandidates(title: String, artist: String) {
         if (title.isBlank() && artist.isBlank()) return
+
+        // 更新当前歌曲唯一标识
+        val songKey = "$title-$artist"
+        currentSongKey = songKey
 
         viewModelScope.launch {
             _isSearching.value = true
@@ -65,7 +80,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             _candidates.value = emptyList()
             val mutex = Mutex()
             try {
-                // 优先插入缓存歌词
+                // 优先插入缓存歌词，但仍然继续搜索远端候选
                 val cached = lyricsCacheRepository.findBySong(title, artist)
                 if (cached != null) {
                     val candidate = CustomLyricsCandidate(
@@ -74,16 +89,21 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                         title = cached.title,
                         artist = cached.artist,
                         confidence = 1.0f,
-                        matchType = "PERFECT",
+                        matchType = "", // 不需要显示
                         displayName = "本地缓存"
                     )
                     appendCandidate(candidate, mutex)
                 }
+
+                // 无本地缓存，继续增量搜索远端候选
                 lyricsRepository.searchLyricsIncremental(title, artist) { result ->
-                    appendCandidate(
-                        candidate = result.toCandidate(),
-                        mutex = mutex
-                    )
+                    // 只在歌曲未切换时追加候选
+                    if (currentSongKey == songKey) {
+                        appendCandidate(
+                            candidate = result.toCandidate(),
+                            mutex = mutex
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to search candidates")
@@ -95,6 +115,10 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun applyCandidate(candidate: CustomLyricsCandidate) {
+        // 更新当前歌曲唯一标识
+        val songKey = "${candidate.title}-${candidate.artist}"
+        currentSongKey = songKey
+
         viewModelScope.launch {
             _isApplying.value = true
             _errorMessage.value = null
@@ -103,7 +127,11 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                     // 直接读取缓存内容
                     val cached = lyricsCacheRepository.findBySong(candidate.title, candidate.artist)
                     if (cached != null && cached.ttmlContent.isNotBlank()) {
-                        _appliedLyricsText.value = cached.ttmlContent
+                        // 只在歌曲未切换时应用歌词
+                        if (currentSongKey == songKey) {
+                            _appliedLyricsSource.value = cached.source
+                            _appliedLyricsText.value = cached.ttmlContent
+                        }
                     } else {
                         _errorMessage.value = "缓存歌词不存在或内容为空"
                     }
@@ -117,7 +145,12 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                     )
                     if (result.isSuccess && result.lyrics != null) {
                         // 转换为TTML格式以保留words数组(逐词同步数据)
-                        _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
+                        // 只在歌曲未切换时应用歌词
+                        if (currentSongKey == songKey) {
+                            // store human-readable provider name as source before text
+                            _appliedLyricsSource.value = providerDisplayName(candidate.provider, candidate.songId)
+                            _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
+                        }
                     } else {
                         _errorMessage.value = result.errorMessage ?: "应用候选歌词失败"
                     }
@@ -143,6 +176,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                 )
                 if (parsed != null) {
                     _appliedLyricsText.value = TTMLConverter.toTTMLString(parsed)
+                    _appliedLyricsSource.value = "manual"
                 } else {
                     _errorMessage.value = "无法识别歌词格式"
                 }
@@ -157,6 +191,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
 
     fun consumeAppliedLyricsText() {
         _appliedLyricsText.value = null
+        _appliedLyricsSource.value = null
     }
 
     private suspend fun appendCandidate(candidate: CustomLyricsCandidate, mutex: Mutex) {
@@ -175,24 +210,37 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun LyricsSearchResult.toCandidate(): CustomLyricsCandidate {
+        // matchType may contain verbose labels such as PERFECT/VERY_HIGH
+        // those are not useful in the UI, so clear them.
         return CustomLyricsCandidate(
             provider = provider,
             songId = songId,
             title = title,
             artist = artist,
             confidence = confidence,
-            matchType = matchType,
-            displayName = providerDisplayName(provider)
+            matchType = "",
+            displayName = providerDisplayName(provider, songId)
         )
     }
 
-    private fun providerDisplayName(provider: String): String {
-        return when (provider.lowercase()) {
+    /**
+     * Human-friendly name for a lyrics provider.
+     *
+     * If an ID is supplied (e.g. AMLL songId) it will be appended in parentheses
+     * for providers where that makes sense.
+     */
+    private fun providerDisplayName(provider: String, id: String? = null): String {
+        val base = when (provider.lowercase()) {
             "netease", "ncm" -> "网易云"
             "qq", "qqmusic" -> "QQ音乐"
             "kugou" -> "酷狗"
             "amll" -> "AMLL TTML DB"
             else -> provider.uppercase()
+        }
+        return if (!id.isNullOrBlank() && provider.lowercase() == "amll") {
+            "$base ($id)"
+        } else {
+            base
         }
     }
 

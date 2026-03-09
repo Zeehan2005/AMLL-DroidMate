@@ -17,27 +17,39 @@ import com.amll.droidmate.domain.model.LyricLine
 
 class LyricNotificationManager(private val context: Context) {
 
-    fun showOrUpdate(currentLine: LyricLine?) {
+    /**
+     * Show or update the live lyric notification.
+     *
+     * @param currentLine the line to display (null clears text)
+     * @param ongoing if true the notification is marked ongoing (non-dismissable);
+     *                if false it may be swiped away by the user.
+     */
+    fun showOrUpdate(currentLine: LyricLine?, ongoing: Boolean = true) {
         if (!hasNotificationPermission()) return
 
         createChannelIfNeeded()
         val safeLine = buildNotificationText(currentLine)
         val contentIntent = createOpenAppIntent()
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentText(safeLine)
             .setStyle(NotificationCompat.BigTextStyle().bigText(safeLine))
             .setContentIntent(contentIntent)
-            .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)        // 提升优先级以确保锁屏显示
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)     // 在锁屏上显示完整内容
             .setShowWhen(false)                                      // 不显示时间戳
             .setCategory(NotificationCompat.CATEGORY_STATUS)         // 分类为状态通知
-            .build()
 
+        if (ongoing) {
+            builder.setOngoing(true)
+        } else {
+            builder.setOngoing(false)
+        }
+
+        val notification = builder.build()
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
     }
 

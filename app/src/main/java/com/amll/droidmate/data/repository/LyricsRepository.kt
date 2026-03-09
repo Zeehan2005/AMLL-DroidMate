@@ -470,7 +470,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchAMLL(title: String, artist: String): LyricsSearchResult? {
         return try {
             val neteaseCandidate = searchNetease(title, artist) ?: return null
-            val amllLyrics = getAMLL_TTMLLyrics(neteaseCandidate.songId) ?: return null
+            val amllLyrics = getAMLL_TTMLLyrics(
+                neteaseCandidate.songId,
+                title = neteaseCandidate.title,
+                artist = neteaseCandidate.artist
+            ) ?: return null
             neteaseCandidate.copy(
                 provider = "amll",
                 title = amllLyrics.metadata.title.takeIf { it.isNotBlank() } ?: neteaseCandidate.title,
@@ -1267,7 +1271,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 从 AMLL TTML DB 获取歌词 (通过网易云音乐ID)
      */
-    suspend fun getAMLL_TTMLLyrics(songId: String): TTMLLyrics? {
+    suspend fun getAMLL_TTMLLyrics(
+        songId: String,
+        title: String? = null,
+        artist: String? = null
+    ): TTMLLyrics? {
         val normalizedSongId = songId.removeSuffix(".ttml")
         val endpoints = listOf(
             "https://amll-ttml-db.stevexmh.net/ncm/$normalizedSongId",
@@ -1293,7 +1301,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
                     continue
                 }
 
-                val parsed = parseTTML(content)
+                val parsed = parseTTML(content, title, artist)
                 if (parsed != null && parsed.lines.isNotEmpty()) {
                     Timber.i("Fetched AMLL lyrics from: $url")
                     lastAmlLError = null
@@ -1429,7 +1437,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
 
             for (amllResult in amllCandidates) {
                 Timber.d("Trying AMLL TTML DB with candidate ID: ${amllResult.songId}")
-                val amllLyrics = getAMLL_TTMLLyrics(amllResult.songId)
+                val amllLyrics = getAMLL_TTMLLyrics(
+                    amllResult.songId,
+                    title = amllResult.title,
+                    artist = amllResult.artist
+                )
                 if (amllLyrics != null) {
                     Timber.i("Successfully fetched from AMLL TTML DB")
                     return LyricsResult(
@@ -1497,7 +1509,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
         return try {
             val normalizedProvider = provider.lowercase()
             val lyrics = when (normalizedProvider) {
-                "amll" -> getAMLL_TTMLLyrics(songId)
+                "amll" -> getAMLL_TTMLLyrics(songId, title, artist)
                 "netease", "ncm" -> getNeteaseLyrics(songId, title, artist)
                 "qq", "qqmusic" -> getQQMusicLyrics(songId, title, artist)
                 "kugou" -> getKugouLyrics(songId, title, artist)
@@ -1538,8 +1550,15 @@ class LyricsRepository(private val httpClient: HttpClient) {
     companion object {
         /**
          * 简单的 TTML 解析器
+         *
+         * @param title 可选歌曲标题，用于覆盖 TTML 文件中可能缺失的元数据
+         * @param artist 可选歌手名，用于覆盖 TTML 文件中可能缺失的元数据
          */
-        fun parseTTML(ttmlContent: String): TTMLLyrics? {
+        fun parseTTML(
+            ttmlContent: String,
+            title: String? = null,
+            artist: String? = null
+        ): TTMLLyrics? {
             return try {
                 Timber.d("[BG-LYRICS-DEBUG] LyricsRepository.parseTTML input: length=${ttmlContent.length}, hasXbg=${ttmlContent.contains("ttm:role=\"x-bg\"")}, hasXTranslation=${ttmlContent.contains("ttm:role=\"x-translation\"")}")
                 val lines = TTMLParser.parse(ttmlContent)
@@ -1549,8 +1568,8 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 Timber.d("[BG-LYRICS-DEBUG] LyricsRepository.parseTTML output: total=${lines.size}, bg=${bgLines.size}, bgWithTrans=$bgWithTranslation, sampleBg='${sampleBg?.text?.take(40) ?: ""}', sampleTrans='${sampleBg?.translation?.take(40) ?: ""}'")
                 TTMLLyrics(
                     metadata = TTMLMetadata(
-                        title = "Unknown",
-                        artist = "Unknown"
+                        title = title ?: "Unknown",
+                        artist = artist ?: "Unknown"
                     ),
                     lines = lines.sortedBy { it.startTime }
                 )

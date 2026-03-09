@@ -151,7 +151,8 @@ private fun SettingsPage(
                     Column(modifier = Modifier.fillMaxWidth(0.78f)) {
                         Text("常驻通知显示当前句歌词")
                         Text(
-                            text = "默认关闭，可在通知权限允许后实时更新。获得锁屏权限后可锁屏显示。",
+                            text = """默认关闭，可在通知权限允许后实时更新。获得锁屏权限后可锁屏显示。
+暂停播放时通知仍保留但可一键清理。""",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )

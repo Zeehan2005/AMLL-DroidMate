@@ -112,6 +112,10 @@ fun fetchLyrics()
   - 多重回退机制
   - 更准确的songId (不再使用"title-artist"拼接)
 
+**歌词通知**
+- 播放暂停时不再直接取消通知，而是将其更新为**可清理**的普通通知，方便一键清除；播放恢复时重新标记为 ongoing。
+- `MainViewModel.updateLyricNotification()` 现在传递 `ongoing` 标志给 `LyricNotificationManager`。
+- 添加了 `ongoing` 参数到 `LyricNotificationManager.showOrUpdate()`。
 ### 3. 文档更新
 
 **新增文档**

@@ -47,16 +47,26 @@ class LyricsCacheRepository(context: Context) {
         val all = readAll().toMutableList()
         val titleKey = normalize(title)
         val artistKey = normalize(artist)
-        val sourceKey = normalize(source)
 
-        val existingIndex = all.indexOfFirst {
-            normalize(it.title) == titleKey &&
-                normalize(it.artist) == artistKey &&
-                normalize(it.source) == sourceKey
+        // Ensure at most one entry per song (title+artist).  If there are multiple
+        // entries with different sources, remove them so we replace with the new one.
+        val duplicates = all.withIndex().filter {
+            normalize(it.value.title) == titleKey &&
+                normalize(it.value.artist) == artistKey
+        }.map { it.index }
+
+        val entryId = if (duplicates.isNotEmpty()) {
+            // keep the first duplicate's id
+            all[duplicates.first()].id
+        } else {
+            UUID.randomUUID().toString()
         }
 
+        // remove all existing duplicates first
+        duplicates.sortedDescending().forEach { all.removeAt(it) }
+
         val newEntry = CachedLyricEntry(
-            id = if (existingIndex >= 0) all[existingIndex].id else UUID.randomUUID().toString(),
+            id = entryId,
             title = title,
             artist = artist,
             source = source,
@@ -64,11 +74,7 @@ class LyricsCacheRepository(context: Context) {
             updatedAt = System.currentTimeMillis()
         )
 
-        if (existingIndex >= 0) {
-            all[existingIndex] = newEntry
-        } else {
-            all.add(newEntry)
-        }
+        all.add(newEntry)
 
         writeAll(all)
     }

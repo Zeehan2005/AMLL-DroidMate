@@ -40,7 +40,7 @@ suspend fun getLyrics(
 
 ```kotlin
 val lyrics = when (normalizedProvider) {
-    "amll" -> getAMLL_TTMLLyrics(songId)
+    "amll" -> getAMLL_TTMLLyrics(songId, title, artist)   // pass metadata too
     "netease", "ncm" -> getNeteaseLyrics(songId, title, artist)
     "qq", "qqmusic" -> getQQMusicLyrics(songId, title, artist)
     "kugou" -> getKugouLyrics(songId, title, artist)
@@ -266,14 +266,25 @@ if (result.isSuccess && result.lyrics != null) {
 - [data/parser/UnifiedLyricsParser.kt](data/parser/UnifiedLyricsParser.kt) - 统一解析器入口
 - [data/parser/LyricsFormat.kt](data/parser/LyricsFormat.kt) - 格式枚举和检测
 - [data/repository/LyricsRepository.kt](data/repository/LyricsRepository.kt) - 平台特定的获取方法
+
+**注**: `CustomLyricsViewModel.providerDisplayName()` 现支持接收 `songId`，对于 AMLL 来源会输出类似 `AMLL TTML DB (123456789)` 的形式，便于缓存和日志区分。
 - [ui/viewmodel/CustomLyricsViewModel.kt](ui/viewmodel/CustomLyricsViewModel.kt) - UI 逻辑
 - [data/converter/TTMLConverter.kt](data/converter/TTMLConverter.kt) - TTML 转换
 
 ## 故障排除
 
 ### 问题：候选歌词元数据为 "Unknown"
-- **原因**: 没有传递 title/artist 参数
-- **解决**: 检查调用 `getLyrics()` 时是否传递了 title 和 artist
+- **原因**: 未将元数据写回到解析后的 TTML（AMLL TTML DB 通常缺少 title/artist）或调用 `getLyrics(provider, songId, title, artist)` 时未提供相关参数。
+- **解决**:
+  1. 在调用 `getLyrics(provider, songId, title, artist)` 时确保传递了候选的 `title` 和 `artist`。
+  2. `LyricsRepository.parseTTML()` 现在接受可选的 `title`/`artist`，并在解析 AMLL 内容时使用这些参数覆盖默认的 `Unknown`。确认 `getAMLL_TTMLLyrics()` 将这些元数据转发给 `parseTTML()`。
+
+### 问题：候选歌词缓存来源显示为 “manual”
+- **原因**: 应用于歌曲的歌词在返回至主界面时一律调用 `applyCustomLyricsInput()`，该方法以前总是使用 `"manual"` 作为缓存源，不区分是搜索候选还是手动输入。
+- **解决**:
+  1. `CustomLyricsActivity` 现在在返回结果中附带额外字段 `EXTRA_SOURCE`，由 `CustomLyricsViewModel` 根据所选候选的 `provider` 或手动输入/导入设置。
+  2. 主界面 (`MainScreen`) 读取该字段并将其传给 `MainViewModel.applyCustomLyricsInput()`。
+  3. `applyCustomLyricsInput()` 接受 `source` 参数并将其传给缓存仓库；来自候选的歌词会写入真实提供商名称，只有手动/文件导入时才写入 `manual`。
 
 ### 问题：QRC 歌词没有逐字同步
 - **原因**: 未使用 UnifiedLyricsParser，或 QcsParser 未正确识别格式

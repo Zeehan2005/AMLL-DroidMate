@@ -40,4 +40,13 @@ class TTMLWhitespacePreserveTest {
         assertEquals(" It's ridiculous ", bgLine?.text)
         assertTrue((bgLine?.words?.size ?: 0) >= 2)
     }
+
+    @Test
+    fun parse_ttml_overrides_metadata() {
+        val ttml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?><tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:00.000\" end=\"00:01.000\">Hello</p></div></body></tt>"""
+        val parsed = LyricsRepository.parseTTML(ttml, title = "My Title", artist = "My Artist")
+        assertNotNull(parsed)
+        assertEquals("My Title", parsed?.metadata?.title)
+        assertEquals("My Artist", parsed?.metadata?.artist)
+    }
 }

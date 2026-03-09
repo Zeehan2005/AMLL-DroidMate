@@ -25,7 +25,7 @@ import timber.log.Timber
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private val context: Context = application.applicationContext
-    
+
     // HTTP Client（使用统一配置，缓存存储在 cache 目录）
     private val httpClient = HttpClientFactory.create(context)
     
@@ -35,14 +35,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     // 服务
     private val mediaInfoService = MediaInfoService(context)
-    private val lyricNotificationManager = LyricNotificationManager(context)
-    
+
+    /**
+     * Real notification manager; tests can replace via the internal var below.
+     */
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal var lyricNotificationManager: LyricNotificationManager =
+        LyricNotificationManager(context)
+
     // UI State
-    private val _nowPlayingMusic = MutableStateFlow<NowPlayingMusic?>(null)
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal val _nowPlayingMusic = MutableStateFlow<NowPlayingMusic?>(null)
     val nowPlayingMusic: StateFlow<NowPlayingMusic?> = _nowPlayingMusic
     
-    private val _lyrics = MutableStateFlow<TTMLLyrics?>(null)
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal val _lyrics = MutableStateFlow<TTMLLyrics?>(null)
     val lyrics: StateFlow<TTMLLyrics?> = _lyrics
+
     
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -66,13 +75,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updateLyricNotification(lyrics: TTMLLyrics?, music: NowPlayingMusic?) {
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal fun updateLyricNotification(lyrics: TTMLLyrics?, music: NowPlayingMusic?) {
         if (!AppSettings.isLyricNotificationEnabled(context)) {
             lyricNotificationManager.cancel()
             return
         }
 
-        if (lyrics == null || music == null) {
+        // when playback is paused we should *not* completely remove the
+        // notification; instead convert it into a dismissable one so the user can
+        // swipe it away or press "clear all".
+        if (music == null) {
+            lyricNotificationManager.cancel()
+            return
+        }
+
+        if (lyrics == null) {
             lyricNotificationManager.cancel()
             return
         }
@@ -81,7 +99,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentLine = lyrics.lines.firstOrNull { time in it.startTime..it.endTime }
             ?: lyrics.lines.lastOrNull { it.startTime <= time }
 
-        lyricNotificationManager.showOrUpdate(currentLine)
+        // ongoing only when actively playing
+        lyricNotificationManager.showOrUpdate(currentLine, ongoing = music.isPlaying)
     }
 
     fun refreshLyricNotification() {
@@ -103,8 +122,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _nowPlayingMusic.value = music
                 Timber.d("Now playing: ${music?.title} - ${music?.artist}")
                 
-                // 如果歌曲确实改变且有有效的歌曲信息，自动获取歌词
+                // 如果歌曲确实改变且有有效的歌曲信息，先尝试使用缓存
                 if (isMusicChanged && music != null) {
+                    // 兼容老旧酷狗缓存需要刷新空格的问题
+                    val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
+                    if (cached != null) {
+                        val shouldBypassCache = cached.source.contains("kugou", ignoreCase = true) ||
+                            cached.source.contains("酷狗")
+                        if (!shouldBypassCache) {
+                            val parsed = LyricsRepository.parseTTML(cached.ttmlContent)
+                            if (parsed != null) {
+                                _lyrics.value = parsed
+                                _errorMessage.value = null
+                                Timber.i("Loaded lyrics from cache (startup): ${cached.title} - ${cached.artist} (${cached.source})")
+                                // 已经拿到缓存，跳过后续搜索
+                                return@collect
+                            }
+                        }
+                    }
+
                     Timber.i("Music changed, auto-fetching lyrics...")
                     fetchLyrics()
                 }
@@ -207,7 +243,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 应用自选歌词输入，支持 TTML / LRC / 纯文本
      */
-    fun applyCustomLyricsInput(content: String, title: String, artist: String) {
+    fun applyCustomLyricsInput(content: String, title: String, artist: String, source: String = "manual") {
         viewModelScope.launch {
             try {
                 val trimmed = content.trim()
@@ -228,7 +264,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     lyricsCacheRepository.upsert(
                         title = if (title.isBlank()) "自选歌词" else title,
                         artist = if (artist.isBlank()) "Unknown" else artist,
-                        source = "manual",
+                        source = source,
                         ttmlContent = TTMLConverter.toTTMLString(parsed)
                     )
                 } else {

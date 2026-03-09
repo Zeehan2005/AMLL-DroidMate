@@ -77,7 +77,11 @@ data class LyricsSearchResult(
     val artist: String,
     val album: String? = null,
     val confidence: Float = 0f,  // 匹配度 0-1
-    val matchType: String = "NONE" // 匹配分档: PERFECT/VERY_HIGH/HIGH...
+    /**
+     * 匹配分档字符串（仅用于调试）。
+     * UI 中不再展示这些词，如 "PERFECT"、"VERY_HIGH" 等。
+     */
+    val matchType: String = "" 
 )
 
 /**

@@ -60,6 +60,9 @@ class CustomLyricsActivity : ComponentActivity() {
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val artist = intent.getStringExtra(EXTRA_ARTIST).orEmpty()
 
+        // 我们不再在 Activity 里阻止搜索，即使有缓存也继续显示候选
+        // （缓存优先逻辑由 ViewModel 处理）
+
         setContent {
             val isDarkTheme = isSystemInDarkTheme()
             val dynamicColorScheme by DynamicThemeManager.observeColorScheme()
@@ -72,6 +75,9 @@ class CustomLyricsActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
+                    val viewModel: CustomLyricsViewModel = viewModel()
+                    val appliedSource by viewModel.appliedLyricsSource.collectAsState()
+
                     CustomLyricsPage(
                         title = title,
                         artist = artist,
@@ -81,6 +87,7 @@ class CustomLyricsActivity : ComponentActivity() {
                                 putExtra(EXTRA_TITLE, title)
                                 putExtra(EXTRA_ARTIST, artist)
                                 putExtra(EXTRA_LYRICS_TEXT, lyricsText)
+                                putExtra(EXTRA_SOURCE, appliedSource ?: "manual")
                             }
                             setResult(Activity.RESULT_OK, result)
                             finish()
@@ -95,6 +102,7 @@ class CustomLyricsActivity : ComponentActivity() {
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_ARTIST = "extra_artist"
         const val EXTRA_LYRICS_TEXT = "extra_lyrics_text"
+        const val EXTRA_SOURCE = "extra_lyrics_source"
     }
 }
 
@@ -108,6 +116,8 @@ private fun CustomLyricsPage(
 ) {
     val viewModel: CustomLyricsViewModel = viewModel()
     val candidates by viewModel.candidates.collectAsState()
+    // Hide local-cache entries from the displayed list
+    val visibleCandidates = candidates.filter { it.provider.lowercase() != "cache" }
     val isSearching by viewModel.isSearching.collectAsState()
     val isApplying by viewModel.isApplying.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -218,7 +228,7 @@ private fun CustomLyricsPage(
                     }
                 }
 
-                items(candidates) { candidate ->
+                items(visibleCandidates) { candidate ->
                     CandidateItem(
                         candidate = candidate,
                         isApplying = isApplying,
@@ -301,7 +311,14 @@ private fun CandidateItem(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "匹配度: ${(candidate.confidence * 100).toInt()}% (${candidate.matchType}) | ID: ${candidate.songId}",
+                // 只显示百分比和 ID，去掉 matchType 文本
+                text = buildString {
+                    append("匹配度: ${(candidate.confidence * 100).toInt()}%")
+                    if (candidate.matchType.isNotBlank()) {
+                        append(" (${candidate.matchType})")
+                    }
+                    append(" | ID: ${candidate.songId}")
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
