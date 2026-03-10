@@ -1447,7 +1447,12 @@ class LyricsRepository(private val httpClient: HttpClient) {
                     return LyricsResult(
                         isSuccess = true,
                         lyrics = amllLyrics,
-                        source = "AMLL TTML DB (网易云 ${amllResult.songId})"
+                        source = formatAutoSource(
+                            provider = "amll",
+                            title = amllResult.title,
+                            artist = amllResult.artist,
+                            songId = amllResult.songId
+                        )
                     )
                 }
             }
@@ -1473,7 +1478,12 @@ class LyricsRepository(private val httpClient: HttpClient) {
                         return LyricsResult(
                             isSuccess = true,
                             lyrics = lyrics,
-                            source = "${provider.uppercase()} (${result.title} - ${result.artist})"
+                            source = formatAutoSource(
+                                provider = provider,
+                                title = result.title,
+                                artist = result.artist,
+                                songId = result.songId
+                            )
                         )
                     }
                 }
@@ -1548,6 +1558,27 @@ class LyricsRepository(private val httpClient: HttpClient) {
     }
 
     companion object {
+        /**
+         * Format a human-readable source string for lyrics that were obtained
+         * automatically after a track change.  This adds the "自动识别:" prefix
+         * and includes title/artist/id similar to candidate labels.
+         */
+        fun formatAutoSource(
+            provider: String,
+            title: String,
+            artist: String,
+            songId: String? = null
+        ): String {
+            val providerName = when (provider.lowercase()) {
+                "amll" -> "AMLL TTML DB"
+                "netease", "ncm" -> "网易云音乐"
+                "qq", "qqmusic" -> "QQ音乐"
+                "kugou" -> "酷狗音乐"
+                else -> provider.uppercase()
+            }
+            return "自动识别:$providerName：$title - $artist(${songId ?: ""})"
+        }
+
         /**
          * 简单的 TTML 解析器
          *

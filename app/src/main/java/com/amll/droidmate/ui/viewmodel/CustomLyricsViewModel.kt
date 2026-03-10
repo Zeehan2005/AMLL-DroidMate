@@ -146,8 +146,13 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                         // 转换为TTML格式以保留words数组(逐词同步数据)
                         // 只在歌曲未切换时应用歌词
                         if (currentSongKey == songKey) {
-                            // store human-readable provider name as source before text
-                            _appliedLyricsSource.value = providerDisplayName(candidate.provider, candidate.songId)
+                            // format the source string with provider-specific rules
+                            _appliedLyricsSource.value = autoSourceForCandidate(
+                                provider = candidate.provider,
+                                title = candidate.title,
+                                artist = candidate.artist,
+                                id = candidate.songId
+                            )
                             _appliedLyricsText.value = TTMLConverter.toTTMLString(result.lyrics)
                         }
                     } else {
@@ -163,6 +168,60 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    companion object {
+        /**
+         * Given raw lyrics input return an appropriate "source" label that will
+         * later be stored in the view model / message intent.  Files are tagged
+         * with their detected format extension (ttml/lrc/etc); free‑form plain
+         * text is still labelled as "manual" for backwards compatibility.
+         */
+        fun sourceFromInput(input: String): String {
+            val format = com.amll.droidmate.data.parser.LyricsFormat.detect(input)
+            return if (format == com.amll.droidmate.data.parser.LyricsFormat.PLAIN_TEXT) {
+                "manual"
+            } else {
+                format.extension
+            }
+        }
+
+        /**
+         * Constructs the source string for lyrics obtained from an external
+         * provider (candidate or cache) – always marks it as auto‑recognized.
+         */
+        fun autoSourceForCandidate(
+            provider: String,
+            title: String,
+            artist: String,
+            id: String?
+        ): String {
+            // every provider uses the same template: 服务商：歌曲名 - 歌手名(id)
+            val providerName = providerDisplayName(provider, id)
+            return "$providerName：$title - $artist(${id ?: ""})"
+        }
+
+        /**
+         * Human-friendly name for a lyrics provider.
+         *
+         * If an ID is supplied (e.g. AMLL songId) it will be appended in parentheses
+         * for providers where that makes sense.
+         */
+        private fun providerDisplayName(provider: String, id: String? = null): String {
+            val base = when (provider.lowercase()) {
+                "netease", "ncm" -> "网易云音乐"
+                "qq", "qqmusic" -> "QQ音乐"
+                "kugou" -> "酷狗音乐"
+                "amll" -> "AMLL TTML DB"
+                else -> provider.uppercase()
+            }
+            return if (!id.isNullOrBlank() && provider.lowercase() == "amll") {
+                "$base ($id)"
+            } else {
+                base
+            }
+        }
+
+    }
+
     fun applyManualInput(input: String, title: String, artist: String) {
         viewModelScope.launch {
             _isApplying.value = true
@@ -175,7 +234,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                 )
                 if (parsed != null) {
                     _appliedLyricsText.value = TTMLConverter.toTTMLString(parsed)
-                    _appliedLyricsSource.value = "manual"
+                    _appliedLyricsSource.value = sourceFromInput(input)
                 } else {
                     _errorMessage.value = "无法识别歌词格式"
                 }
@@ -218,30 +277,10 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             artist = artist,
             confidence = confidence,
             matchType = "",
-            displayName = providerDisplayName(provider, songId)
+            displayName = Companion.providerDisplayName(provider, songId)
         )
     }
 
-    /**
-     * Human-friendly name for a lyrics provider.
-     *
-     * If an ID is supplied (e.g. AMLL songId) it will be appended in parentheses
-     * for providers where that makes sense.
-     */
-    private fun providerDisplayName(provider: String, id: String? = null): String {
-        val base = when (provider.lowercase()) {
-            "netease", "ncm" -> "网易云"
-            "qq", "qqmusic" -> "QQ音乐"
-            "kugou" -> "酷狗"
-            "amll" -> "AMLL TTML DB"
-            else -> provider.uppercase()
-        }
-        return if (!id.isNullOrBlank() && provider.lowercase() == "amll") {
-            "$base ($id)"
-        } else {
-            base
-        }
-    }
 
     override fun onCleared() {
         super.onCleared()
