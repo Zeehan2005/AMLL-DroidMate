@@ -1,6 +1,7 @@
 package com.amll.droidmate.data.repository
 
 import io.ktor.client.*
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.mock.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -8,6 +9,13 @@ import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
+
+// domain models used in tests
+import com.amll.droidmate.domain.model.LyricsSearchResult
+import com.amll.droidmate.domain.model.LyricsResult
+import com.amll.droidmate.domain.model.LyricsFeature
+import com.amll.droidmate.domain.model.TTMLLyrics
+import com.amll.droidmate.domain.model.TTMLMetadata
 
 class LyricsRepositoryTest {
     @Test
@@ -18,7 +26,7 @@ class LyricsRepositoryTest {
             val ttml = """<?xml version=\"1.0\"?><tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:00.000\" end=\"00:00.500\">hi</p></div></body></tt>"""
             respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
         // call with bare id, should assume ncm
         repo.getAMLL_TTMLLyrics("12345")
@@ -34,7 +42,7 @@ class LyricsRepositoryTest {
             val ttml = """<?xml version=\"1.0\"?><tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:00.000\" end=\"00:00.500\">hi</p></div></body></tt>"""
             respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
         // prefix with qq:
         repo.getAMLL_TTMLLyrics("qq:ABCDEF")
@@ -55,7 +63,7 @@ class LyricsRepositoryTest {
                 respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
             }
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
         val lyrics = repo.getAMLL_TTMLLyrics("qq:AAA:BBB")
         assertNotNull(lyrics)
@@ -77,7 +85,7 @@ class LyricsRepositoryTest {
                 respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
             }
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
         val lyrics = repo.getAMLL_TTMLLyrics("qq:dhi8dhagd::3627319237")
         assertNotNull(lyrics)
@@ -91,7 +99,7 @@ class LyricsRepositoryTest {
         val input = "Beyoncé - Halo (Acoustic Version)"
         val normalized = runTest { 
             // use repository without needing real client
-            val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+            val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
             fake.normalizeForComparison(input)
         }
         assertEquals("beyonce - halo (acoustic)", normalized)
@@ -99,7 +107,7 @@ class LyricsRepositoryTest {
 
     @Test
     fun `compareName recognizes dash paren equivalence`() {
-        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
         val n1 = fake.compareName("Song - Live", "Song (Live)")
         assertNotNull(n1)
         assertEquals("VERY_HIGH", n1!!.name)
@@ -107,7 +115,7 @@ class LyricsRepositoryTest {
 
     @Test
     fun `evaluateMatch returns high confidence for similar titles`() {
-        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
         val eval = fake.evaluateMatch(
             searchTitle = "Hello",
             searchArtist = "Adele",
@@ -136,10 +144,10 @@ class LyricsRepositoryTest {
   </body>
 </tt>"""
 
-        val engine = MockEngine { request ->
+        val engine = MockEngine { _ ->
             respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
 
         val features = repo.getLyricsFeatures("amll", "someid", "title", "artist")
@@ -160,10 +168,10 @@ class LyricsRepositoryTest {
   </body>
 </tt>"""
 
-        val engine = MockEngine { request ->
+        val engine = MockEngine { _ ->
             respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
 
         val features = repo.getLyricsFeatures("amll", "id", "t", "a")
@@ -200,7 +208,7 @@ class LyricsRepositoryTest {
             }
             respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
         }
-        val client = HttpClient(engine)
+        val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
 
         val ordered = repo.adjustResultsForFeatures(listOf(result1, result2))
@@ -211,15 +219,16 @@ class LyricsRepositoryTest {
         val result3 = result1.copy(confidence = 0.90f)
         val result4 = result2.copy(confidence = 0.90f)
         val ordered2 = repo.adjustResultsForFeatures(listOf(result3, result4))
-        assertEquals(result4, ordered2.first(), "equal confidence, candidate with features wins")
+        // message goes first in JUnit assertEquals
+        assertEquals("equal confidence, candidate with features wins", result4, ordered2.first())
     }
 
     @Test
     fun `fetchLyricsAuto picks highest-confidence candidate first`() = runTest {
-        val fake = object : LyricsRepository(HttpClient(MockEngine { request ->
+        val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
             // this engine should never actually be used in our overrides
             respond("", HttpStatusCode.OK)
-        })) {
+        }) as HttpClientEngine)) {
             override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
                 return listOf(
                     LyricsSearchResult(provider = "amll", songId = "1", title = "t", artist = "a", confidence = 0.90f),
@@ -257,7 +266,7 @@ class LyricsRepositoryTest {
 
     @Test
     fun `compareArtists handles ampersand and and equivalence`() {
-        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
         val res = fake.compareArtists("Simon & Garfunkel", "Simon and Garfunkel")
         assertNotNull(res)
         assertTrue(res!!.score >= LyricsRepository.ArtistMatchType.PERFECT.score)

@@ -26,7 +26,7 @@ import timber.log.Timber
  * 歌词仓库 - 从多个来源获取和管理歌词
  * 基于 Unilyric 的多源搜索逻辑实现
  */
-class LyricsRepository(private val httpClient: HttpClient) {
+open class LyricsRepository(private val httpClient: HttpClient) {
 
     // exposed for testing
     internal enum class MatchType(val score: Int) {
@@ -1373,7 +1373,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 从 AMLL TTML DB 获取歌词 (通过网易云音乐ID)
      */
-    suspend fun getAMLL_TTMLLyrics(
+    open suspend fun getAMLL_TTMLLyrics(
         songId: String,
         title: String? = null,
         artist: String? = null
@@ -1452,7 +1452,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
      * 基于 Unilyric 的多源搜索策略
      * 使用并行搜索加速（对齐 Unilyric）
      */
-    suspend fun searchLyrics(
+    open suspend fun searchLyrics(
         title: String,
         artist: String
     ): List<LyricsSearchResult> = searchLyricsIncremental(title, artist) { }
@@ -1460,7 +1460,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 增量搜索歌词：某个来源先返回就先通知上层，避免 UI 必须等待全部来源结束。
      */
-    suspend fun searchLyricsIncremental(
+    open suspend fun searchLyricsIncremental(
         title: String,
         artist: String,
         onResult: suspend (LyricsSearchResult) -> Unit
@@ -1713,7 +1713,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
      * fetch routines used by [getLyrics], then runs a quick scan on the parsed
      * TTML object.
      */
-    suspend fun getLyricsFeatures(
+    open suspend fun getLyricsFeatures(
         provider: String,
         songId: String,
         title: String? = null,

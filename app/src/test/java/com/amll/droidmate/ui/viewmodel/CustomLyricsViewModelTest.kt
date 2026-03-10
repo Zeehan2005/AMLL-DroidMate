@@ -89,7 +89,7 @@ class CustomLyricsViewModelTest {
             viewModel.searchCandidates("", "") // no-op but ensures flows initialized
         }
         // directly test comparator
-        val sorted = listOf(c1, c2).sortedWith(viewModel::candidateComparator)
+        val sorted = listOf(c1, c2).sortedWith(viewModel.candidateComparator)
         assertEquals(c2, sorted.first())
     }
 
