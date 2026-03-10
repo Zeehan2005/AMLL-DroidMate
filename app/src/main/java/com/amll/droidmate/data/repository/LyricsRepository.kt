@@ -314,6 +314,22 @@ class LyricsRepository(private val httpClient: HttpClient) {
         return if (songId.all { it.isDigit() }) null to songId.toLongOrNull() else songId to null
     }
 
+    /**
+     * Parse a song identifier that may include an AMLL platform prefix.
+     * Examples:
+     *   "ncm:12345" -> ("ncm","12345")
+     *   "qq:ABCDEFGHI" -> ("qq","ABCDEFGHI")
+     *   "98765" -> ("ncm","98765")  // default to ncm for backward compatibility
+     */
+    private fun parseAmlLId(raw: String): Pair<String, String> {
+        val parts = raw.split(":", limit = 2)
+        return if (parts.size == 2 && parts[0].isNotBlank()) {
+            parts[0].lowercase() to parts[1]
+        } else {
+            "ncm" to raw
+        }
+    }
+
     private suspend fun getQQMusicLyricsViaLyricDownload(
         musicId: Long,
         title: String?,
@@ -465,18 +481,25 @@ class LyricsRepository(private val httpClient: HttpClient) {
     }
 
     /**
-     * AMLL 轻量搜索：通过网易云候选 ID 探测 AMLL 是否存在，避免本地索引匹配造成卡顿。
+     * AMLL 轻量搜索：尝试通过已知音乐服务的 ID 查找数据库，以避免本地索引匹配造成卡顿。
+     *
+     * 当仅给定网易云候选时会默认使用 ncm 平台（这是最常见的情况），
+     * 但是后台也会在获得 QQ 结果后额外向 `qq` 平台发起探测；
+     * 将来若需要可扩展至 spotify、am 等其他平台。
      */
     suspend fun searchAMLL(title: String, artist: String): LyricsSearchResult? {
         return try {
             val neteaseCandidate = searchNetease(title, artist) ?: return null
+            // prefix with platform so that callers later know which path to hit
+            val amllId = "ncm:${neteaseCandidate.songId}"
             val amllLyrics = getAMLL_TTMLLyrics(
-                neteaseCandidate.songId,
+                amllId,
                 title = neteaseCandidate.title,
                 artist = neteaseCandidate.artist
             ) ?: return null
             neteaseCandidate.copy(
                 provider = "amll",
+                songId = amllId,
                 title = amllLyrics.metadata.title.takeIf { it.isNotBlank() } ?: neteaseCandidate.title,
                 artist = amllLyrics.metadata.artist.takeIf { it.isNotBlank() } ?: neteaseCandidate.artist,
                 album = amllLyrics.metadata.album ?: neteaseCandidate.album
@@ -1276,50 +1299,69 @@ class LyricsRepository(private val httpClient: HttpClient) {
         title: String? = null,
         artist: String? = null
     ): TTMLLyrics? {
-        val normalizedSongId = songId.removeSuffix(".ttml")
-        val endpoints = listOf(
-            "https://amll-ttml-db.stevexmh.net/ncm/$normalizedSongId",
-            "https://amlldb.bikonoo.com/ncm-lyrics/$normalizedSongId.ttml",
-            "https://amll.mirror.dimeta.top/api/db/ncm-lyrics/$normalizedSongId.ttml",
-            "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main/ncm-lyrics/$normalizedSongId.ttml"
-        )
+        // allow callers to pass a platform prefix (e.g. "qq:12345") or omit for
+        // backwards compatibility.  default platform is ncm (网易云).
+        val (platform, rawId) = parseAmlLId(songId)
+        // for QQ IDs we may receive "id1::id2".
+        // which is the typical Unilyric format, so split on
+        // "::" first to avoid producing an empty string for the second part.
+        val candidateIds = when {
+            platform == "qq" && rawId.contains("::") -> rawId.split("::", limit = 2)
+            else -> listOf(rawId)
+        }
 
         var unknownHostCount = 0
+        var totalEndpoints = 0
         lastAmlLError = null
 
-        for (url in endpoints) {
-            try {
-                val response = httpClient.get(url)
-                if (!response.status.isSuccess()) {
-                    Timber.w("AMLL endpoint non-success status ${response.status.value}: $url")
-                    continue
-                }
+        for (normalizedSongId in candidateIds) {
+            // build the list of endpoints; the mirrors we had before only host the ncm
+            // archive so they should only be used when platform == "ncm".  the new
+            // public service covers all supported platforms.
+            val endpoints = mutableListOf<String>()
+            endpoints += "https://amll-ttml-db.stevexmh.net/$platform/$normalizedSongId"
+            if (platform == "ncm") {
+                endpoints += "https://amlldb.bikonoo.com/ncm-lyrics/$normalizedSongId.ttml"
+                endpoints += "https://amll.mirror.dimeta.top/api/db/ncm-lyrics/$normalizedSongId.ttml"
+                endpoints += "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main/ncm-lyrics/$normalizedSongId.ttml"
+            }
 
-                val content = response.body<String>()
-                if (!content.contains("<tt", ignoreCase = true)) {
-                    Timber.w("AMLL endpoint returned non-TTML payload: $url")
-                    continue
-                }
+            totalEndpoints += endpoints.size
 
-                val parsed = parseTTML(content, title, artist)
-                if (parsed != null && parsed.lines.isNotEmpty()) {
-                    Timber.i("Fetched AMLL lyrics from: $url")
-                    lastAmlLError = null
-                    return parsed
+            for (url in endpoints) {
+                try {
+                    val response = httpClient.get(url)
+                    if (!response.status.isSuccess()) {
+                        Timber.w("AMLL endpoint non-success status ${response.status.value}: $url")
+                        continue
+                    }
+
+                    val content = response.body<String>()
+                    if (!content.contains("<tt", ignoreCase = true)) {
+                        Timber.w("AMLL endpoint returned non-TTML payload: $url")
+                        continue
+                    }
+
+                    val parsed = parseTTML(content, title, artist)
+                    if (parsed != null && parsed.lines.isNotEmpty()) {
+                        Timber.i("Fetched AMLL lyrics from: $url")
+                        lastAmlLError = null
+                        return parsed
+                    }
+                    Timber.w("TTML parse yielded empty result: $url")
+                } catch (e: UnknownHostException) {
+                    unknownHostCount += 1
+                    Timber.w(e, "AMLL host unresolved: $url")
+                } catch (e: Exception) {
+                    Timber.w(e, "AMLL endpoint failed: $url")
                 }
-                Timber.w("TTML parse yielded empty result: $url")
-            } catch (e: UnknownHostException) {
-                unknownHostCount += 1
-                Timber.w(e, "AMLL host unresolved: $url")
-            } catch (e: Exception) {
-                Timber.w(e, "AMLL endpoint failed: $url")
             }
         }
 
-        lastAmlLError = if (unknownHostCount == endpoints.size) {
+        lastAmlLError = if (unknownHostCount == totalEndpoints) {
             "All AMLL hosts are unreachable (DNS)."
         } else {
-            "Lyrics not found on AMLL mirrors for songId=$normalizedSongId"
+            "Lyrics not found on AMLL mirrors for songId=$rawId"
         }
 
         Timber.e("Error fetching AMLL TTML lyrics: $lastAmlLError")
@@ -1379,6 +1421,29 @@ class LyricsRepository(private val httpClient: HttpClient) {
             val result = runCatching { searchQQMusic(title, artist) }.getOrNull()
             Timber.d("QQ Music search completed: ${if (result != null) "found" else "null"}")
             tryPublish(result)
+
+            // additionally probe AMLL DB using the QQ id if we found a candidate
+            if (result != null) {
+                val prefixId = "qq:${result.songId}"
+                Timber.d("Probing AMLL DB for QQ candidate: $prefixId")
+                val amllResult = runCatching {
+                    getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
+                }.getOrNull()?.let { lyrics ->
+                    result.copy(
+                        provider = "amll",
+                        songId = prefixId,
+                        title = lyrics.metadata.title.takeIf { it.isNotBlank() } ?: result.title,
+                        artist = lyrics.metadata.artist.takeIf { it.isNotBlank() } ?: result.artist,
+                        album = lyrics.metadata.album ?: result.album
+                    )
+                }
+                if (amllResult != null) {
+                    Timber.d("QQ AMLL probe succeeded, publishing amll result")
+                    tryPublish(amllResult)
+                } else {
+                    Timber.d("QQ AMLL probe returned no data")
+                }
+            }
         }
 
         val kugouJob = launch {
@@ -1569,14 +1634,21 @@ class LyricsRepository(private val httpClient: HttpClient) {
             artist: String,
             songId: String? = null
         ): String {
-            val providerName = when (provider.lowercase()) {
+            var providerName = when (provider.lowercase()) {
                 "amll" -> "AMLL TTML DB"
                 "netease", "ncm" -> "网易云音乐"
                 "qq", "qqmusic" -> "QQ音乐"
                 "kugou" -> "酷狗音乐"
                 else -> provider.uppercase()
             }
-            return "自动识别:$providerName：$title - $artist(${songId ?: ""})"
+            var idPart = songId ?: ""
+            if (provider.lowercase() == "amll" && !idPart.isNullOrBlank() && idPart.contains(":")) {
+                val parts = idPart.split(":", limit = 2)
+                val plat = parts[0].uppercase()
+                idPart = parts[1]
+                providerName = "$providerName($plat)"
+            }
+            return "自动识别:$providerName：$title - $artist($idPart)"
         }
 
         /**

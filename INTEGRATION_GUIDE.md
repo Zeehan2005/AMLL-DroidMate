@@ -266,6 +266,8 @@ suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult
 suspend fun getLyrics(provider: String, songId: String): LyricsResult
 
 // 从 AMLL TTML DB 获取
+// songId 可以含有平台前缀，例如 "qq:12345" 或 "spotify:abcdef"；
+// 不带前缀时默认使用 ncm/网易云 ID，保持向后兼容。
 suspend fun getAMLL_TTMLLyrics(songId: String): TTMLLyrics?
 
 // 解析 TTML

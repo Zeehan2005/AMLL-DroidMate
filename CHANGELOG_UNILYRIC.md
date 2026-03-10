@@ -30,7 +30,7 @@ suspend fun getNeteaseLyrics(songId: String): TTMLLyrics?
 - 搜索API: `https://music.163.com/api/search/get/web`
 - 歌词API: `https://music.163.com/api/song/lyric`
 - 格式: LRC → TTML
-- 特点: 与AMLL TTML DB的NCM ID对应,优先级最高
+- 特点: 与AMLL TTML DB的NCM ID对应,优先级最高（现已支持通过平台前缀查询，如qq:/spotify:）
 
 **酷狗音乐**
 ```kotlin

@@ -114,7 +114,7 @@ Android.onLineClick(lineIndex)
    - 实时音频频谱可视化
 
 3. **逐字同步**
-   - 支持 AMLL TTML DB 的逐字歌词
+   - 支持 AMLL TTML DB 的逐字歌词（可按 ncm/qq/am/spotify 平台查询）
    - 精确到单词/字的时间轴
    - 卡拉OK风格高亮
 

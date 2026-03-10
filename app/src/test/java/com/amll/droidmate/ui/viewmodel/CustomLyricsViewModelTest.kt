@@ -81,6 +81,16 @@ class CustomLyricsViewModelTest {
             songId = "9999"
         )
         assertEquals("自动识别:AMLL TTML DB：X - Y(9999)", s2)
+
+        // when the ID includes a platform prefix we expect the provider
+        // name to carry the platform and the ID part to be stripped
+        val s3 = com.amll.droidmate.data.repository.LyricsRepository.formatAutoSource(
+            provider = "amll",
+            title = "Foo",
+            artist = "Bar",
+            songId = "qq:abcd"
+        )
+        assertEquals("自动识别:AMLL TTML DB(QQ)：Foo - Bar(abcd)", s3)
     }
 
 }
