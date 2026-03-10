@@ -28,7 +28,8 @@ import timber.log.Timber
  */
 class LyricsRepository(private val httpClient: HttpClient) {
 
-    private enum class MatchType(val score: Int) {
+    // exposed for testing
+    internal enum class MatchType(val score: Int) {
         NONE(-1),
         VERY_LOW(10),
         LOW(30),
@@ -39,11 +40,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
         PERFECT(100)
     }
 
-    private enum class NameMatchType(val score: Int) {
+    internal enum class NameMatchType(val score: Int) {
         NO_MATCH(0), LOW(2), MEDIUM(4), HIGH(5), VERY_HIGH(6), PERFECT(7)
     }
 
-    private enum class ArtistMatchType(val score: Int) {
+    internal enum class ArtistMatchType(val score: Int) {
         NO_MATCH(0), LOW(2), MEDIUM(4), HIGH(5), VERY_HIGH(6), PERFECT(7)
     }
 
@@ -839,8 +840,16 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 规范化名称用于比较（基于 Unilyric 的 normalize_name_for_comparison）
      */
-    private fun normalizeForComparison(name: String): String {
-        return name
+    private fun stripAccents(input: String): String {
+        // remove diacritics (e.g. é -> e) to make comparison accent-insensitive
+        val normalized = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFD)
+        return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
+    }
+
+    internal fun normalizeForComparison(name: String): String {
+        // apply accent stripping first
+        var s = stripAccents(name)
+        s = s
             .replace('’', '\'')                           // 特殊单引号 -> 普通单引号
             .replace("，", ",")                          // 全角逗号 -> 半角逗号
             .replace("（", " (")                         // 全角左括号 -> 半角+空格
@@ -849,17 +858,22 @@ class LyricsRepository(private val httpClient: HttpClient) {
             .replace("】", ") ")
             .replace("[", "(")                           // 方括号 -> 圆括号
             .replace("]", ")")
+            // remove common punctuation that does not affect semantics
+            .replace(Regex("[\"'.,!?؛:・]"), "")
             .replace("acoustic version", "acoustic", ignoreCase = true)  // 语义简化
+            .replace(Regex("feat\\.?|ft\\.?|featuring", RegexOption.IGNORE_CASE), "") // strip featured tags
+            .replace(Regex("\\b(the|a|an)\\b", RegexOption.IGNORE_CASE), "") // drop leading articles
             .replace(Regex("\\s+"), " ")                 // 多个空格 -> 单个空格
             .trim()
+        return s
     }
 
-    private data class MatchEvaluation(
+    internal data class MatchEvaluation(
         val confidence: Float,
         val matchType: String
     )
 
-    private fun evaluateMatch(
+    internal fun evaluateMatch(
         searchTitle: String,
         searchArtist: String,
         resultTitle: String,
@@ -889,25 +903,25 @@ class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 规范化标题用于匹配（基于 Unilyric 的 compare_name）
      */
-    private fun normalizeTitle(title: String): String {
+    internal fun normalizeTitle(title: String): String {
         return normalizeForComparison(title.lowercase())
     }
 
-    private fun normalizeArtistList(artist: String): List<String> {
+    internal fun normalizeArtistList(artist: String): List<String> {
         return artist.split(Regex("[/、,;]"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .map { normalizeForComparison(it.lowercase()) }
     }
 
-    private fun computeTextSame(text1: String, text2: String): Double {
+    internal fun computeTextSame(text1: String, text2: String): Double {
         val maxLen = maxOf(text1.length, text2.length)
         if (maxLen == 0) return 100.0
         val distance = levenshteinDistance(text1, text2)
         return (1.0 - distance.toDouble() / maxLen.toDouble()) * 100.0
     }
 
-    private fun levenshteinDistance(a: String, b: String): Int {
+    internal fun levenshteinDistance(a: String, b: String): Int {
         if (a == b) return 0
         if (a.isEmpty()) return b.length
         if (b.isEmpty()) return a.length
@@ -935,7 +949,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
      * 检查 dash-paren 等价性（基于 Unilyric）
      * 例如: "Song - Live" ≈ "Song (Live)"
      */
-    private fun checkDashParenEquivalence(dashText: String, parenText: String): Boolean {
+    internal fun checkDashParenEquivalence(dashText: String, parenText: String): Boolean {
         val hasDash = dashText.contains(" - ") && !dashText.contains('(')
         val hasParen = parenText.contains('(') && !parenText.contains(" - ")
 
@@ -946,7 +960,20 @@ class LyricsRepository(private val httpClient: HttpClient) {
         return converted == parenText
     }
 
-    private fun compareName(name1: String?, name2: String?): NameMatchType? {
+    // version-related keywords that often indicate alternate mixes/edits/releases
+    private fun extractVersionKeywords(s: String): Set<String> {
+        val keywords = listOf(
+            "remix", "live", "dj", "version", "edit", "mix", "acoustic",
+            "instrumental", "radio", "extended", "album", "single", "deluxe",
+            "explicit", "bonus", "cover", "karaoke", "remastered", "rework",
+            "re-edit", "dub", "club", "unplugged", "piano", "strings",
+            "orchestral", "demo", "remaster"
+        )
+        val lower = s.lowercase()
+        return keywords.filter { lower.contains(it) }.toSet()
+    }
+
+    internal fun compareName(name1: String?, name2: String?): NameMatchType? {
         val raw1 = name1?.trim().orEmpty()
         val raw2 = name2?.trim().orEmpty()
         if (raw1.isEmpty() || raw2.isEmpty()) return null
@@ -959,6 +986,17 @@ class LyricsRepository(private val httpClient: HttpClient) {
         val n1 = normalizeForComparison(lowered1)
         val n2 = normalizeForComparison(lowered2)
         if (n1 == n2) return NameMatchType.PERFECT
+
+        // if the normalized names contain differing version/mix tags,
+        // treat as a much weaker match since they are likely separate releases
+        val v1 = extractVersionKeywords(n1)
+        val v2 = extractVersionKeywords(n2)
+        if (v1.isNotEmpty() || v2.isNotEmpty()) {
+            if (v1 != v2) {
+                Timber.d("      version keyword mismatch: $v1 vs $v2 -> LOW")
+                return NameMatchType.LOW
+            }
+        }
 
         if (checkDashParenEquivalence(n1, n2) || checkDashParenEquivalence(n2, n1)) {
             return NameMatchType.VERY_HIGH
@@ -1009,9 +1047,13 @@ class LyricsRepository(private val httpClient: HttpClient) {
      * 艺术家匹配（近似 Unilyric compare_artists）。
      * 当前未做繁简转换，其他规则保持一致。
      */
-    private fun compareArtists(artists1: String?, artists2: String?): ArtistMatchType? {
+    internal fun compareArtists(artists1: String?, artists2: String?): ArtistMatchType? {
         val list1 = normalizeArtistList(artists1.orEmpty())
         val list2 = normalizeArtistList(artists2.orEmpty())
+        // normalize common conjunctions in artist names
+        fun normalizeConjunctions(list: List<String>) = list.map { it.replace(" & ", " and ") }
+        val n1 = normalizeConjunctions(list1)
+        val n2 = normalizeConjunctions(list2)
         if (list1.isEmpty() || list2.isEmpty()) return null
 
         val l1Various = list1.any { it.contains("various") || it.contains("群星") }
@@ -1022,9 +1064,9 @@ class LyricsRepository(private val httpClient: HttpClient) {
 
         val used = mutableSetOf<Int>()
         var intersection = 0
-        for (a in list1) {
+        for (a in n1) {
             var matchedIdx: Int? = null
-            for ((idx, b) in list2.withIndex()) {
+            for ((idx, b) in n2.withIndex()) {
                 if (used.contains(idx)) continue
                 if (b.contains(a) || a.contains(b) || computeTextSame(a, b) > 88.0) {
                     matchedIdx = idx
@@ -1037,7 +1079,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
             }
         }
 
-        val union = list1.size + list2.size - intersection
+        val union = n1.size + n2.size - intersection
         if (union == 0) return ArtistMatchType.PERFECT
         val jaccard = intersection.toDouble() / union.toDouble()
 
@@ -1051,7 +1093,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
         }
     }
 
-    private fun compareDuration(duration1: Long?, duration2: Long?): NameMatchType? {
+    internal fun compareDuration(duration1: Long?, duration2: Long?): NameMatchType? {
         val d1 = duration1 ?: return null
         val d2 = duration2 ?: return null
         val diff = kotlin.math.abs(d1 - d2).toDouble() / 1000.0
@@ -1069,7 +1111,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
         }
     }
 
-    private fun compareTrack(
+    internal fun compareTrack(
         searchTitle: String,
         searchArtist: String,
         resultTitle: String,
@@ -1083,10 +1125,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
         val artistMatch = compareArtists(searchArtist, resultArtist)
         val albumMatch = compareName(searchAlbum, resultAlbum)
         val durationMatch = compareDuration(searchDurationMs, resultDurationMs)
+        // weights can be tweaked later or exposed via configuration
         val titleWeight = 1.0
         val artistWeight = 1.0
-        val albumWeight = 0.4
-        val durationWeight = 1.0
+        val albumWeight = 0.5   // slightly higher importance for album
+        val durationWeight = 0.8 // use duration but not dominant
         val maxSingle = 7.0
 
         Timber.d("    compareTrack details:")
@@ -1113,14 +1156,15 @@ class LyricsRepository(private val httpClient: HttpClient) {
 
         Timber.d("      totalScore (raw): $totalScore, possibleScore: $possibleScore, normalized: $normalizedScore")
 
+        // thresholds adjusted after tuning to reduce false positives
         val thresholds = listOf(
-            21.0 to MatchType.PERFECT,
-            19.0 to MatchType.VERY_HIGH,
-            17.0 to MatchType.HIGH,
+            22.0 to MatchType.PERFECT,
+            20.0 to MatchType.VERY_HIGH,
+            17.5 to MatchType.HIGH,
             15.0 to MatchType.PRETTY_HIGH,
             11.0 to MatchType.MEDIUM,
-            6.5 to MatchType.LOW,
-            2.5 to MatchType.VERY_LOW
+            7.0 to MatchType.LOW,
+            3.0 to MatchType.VERY_LOW
         )
 
         for ((threshold, mt) in thresholds) {

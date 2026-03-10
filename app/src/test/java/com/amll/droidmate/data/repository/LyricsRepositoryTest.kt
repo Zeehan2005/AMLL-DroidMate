@@ -84,4 +84,46 @@ class LyricsRepositoryTest {
         assertTrue(requested.any { it.contains("/qq/dhi8dhagd") })
         assertTrue(requested.any { it.contains("/qq/3627319237") })
     }
+
+    // ---- new matching tests ----
+    @Test
+    fun `normalizeForComparison removes accents and punctuation`() {
+        val input = "Beyoncé - Halo (Acoustic Version)"
+        val normalized = runTest { 
+            // use repository without needing real client
+            val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+            fake.normalizeForComparison(input)
+        }
+        assertEquals("beyonce - halo (acoustic)", normalized)
+    }
+
+    @Test
+    fun `compareName recognizes dash paren equivalence`() {
+        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val n1 = fake.compareName("Song - Live", "Song (Live)")
+        assertNotNull(n1)
+        assertEquals("VERY_HIGH", n1!!.name)
+    }
+
+    @Test
+    fun `evaluateMatch returns high confidence for similar titles`() {
+        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val eval = fake.evaluateMatch(
+            searchTitle = "Hello",
+            searchArtist = "Adele",
+            resultTitle = "Hello",
+            resultArtist = "Adele",
+            searchDurationMs = 300000,
+            resultDurationMs = 301000
+        )
+        assertTrue(eval.confidence > 0.9f)
+    }
+
+    @Test
+    fun `compareArtists handles ampersand and and equivalence`() {
+        val fake = LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }))
+        val res = fake.compareArtists("Simon & Garfunkel", "Simon and Garfunkel")
+        assertNotNull(res)
+        assertTrue(res!!.score >= LyricsRepository.ArtistMatchType.PERFECT.score)
+    }
 }
