@@ -1,6 +1,6 @@
-** Code from [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) is under AGPL-3.0 license. **
+**Code from [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) is under AGPL-3.0 license.**
 
-** Code from [Unilyric](https://github.com/apoint123/Unilyric) is under MIT license. **
+**Code from [Unilyric](https://github.com/apoint123/Unilyric) is under MIT license.**
 
 
 ## AMLL
