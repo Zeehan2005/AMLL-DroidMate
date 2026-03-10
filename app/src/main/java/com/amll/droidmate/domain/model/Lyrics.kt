@@ -68,6 +68,18 @@ data class TTMLMetadata(
 )
 
 /**
+ * 支持的功能（用于 UI 提示）
+ */
+enum class LyricsFeature(val displayName: String) {
+    DUET("对唱"),
+    BACKGROUND("背景"),
+    OVERLAP("重叠"),
+    TRANSLATION("翻译"),
+    TRANSLITERATION("音译"),
+    WORDS("逐字")
+}
+
+/**
  * 歌词搜索结果
  */
 @Serializable

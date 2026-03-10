@@ -62,6 +62,38 @@ class CustomLyricsViewModelTest {
     }
 
     @Test
+    fun `candidates sort by features when confidence close`() = runTest {
+        val viewModel = CustomLyricsViewModel(Application())
+        val c1 = CustomLyricsCandidate(
+            provider = "qq",
+            songId = "1",
+            title = "T",
+            artist = "A",
+            confidence = 0.90f,
+            matchType = "",
+            displayName = "",
+            features = emptySet()
+        )
+        val c2 = CustomLyricsCandidate(
+            provider = "qq",
+            songId = "2",
+            title = "T",
+            artist = "A",
+            confidence = 0.88f,
+            matchType = "",
+            displayName = "",
+            features = setOf(com.amll.droidmate.domain.model.LyricsFeature.TRANSLATION)
+        )
+        // when inserted separately comparator will reorder
+        runTest {
+            viewModel.searchCandidates("", "") // no-op but ensures flows initialized
+        }
+        // directly test comparator
+        val sorted = listOf(c1, c2).sortedWith(viewModel::candidateComparator)
+        assertEquals(c2, sorted.first())
+    }
+
+    @Test
     fun `formatAutoSource adds prefix and handles various providers`() {
         // provider only
         val s1 = com.amll.droidmate.data.repository.LyricsRepository.formatAutoSource(

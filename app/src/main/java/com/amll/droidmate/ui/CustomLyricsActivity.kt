@@ -320,11 +320,17 @@ private fun CandidateItem(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                // 只显示百分比和 ID，去掉 matchType 文本
+                // 显示百分比、ID 以及支持的功能列表
                 text = buildString {
                     append("匹配度: ${(candidate.confidence * 100).toInt()}%")
                     if (candidate.matchType.isNotBlank()) {
                         append(" (${candidate.matchType})")
+                    }
+                    if (candidate.features.isNotEmpty()) {
+                        append(" | 支持: ")
+                        append(candidate.features.joinToString(separator = ", ") {
+                            it.displayName
+                        })
                     }
                     append(" | ID: ${candidate.songId}")
                 },

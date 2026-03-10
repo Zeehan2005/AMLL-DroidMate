@@ -970,7 +970,26 @@ class LyricsRepository(private val httpClient: HttpClient) {
             "orchestral", "demo", "remaster"
         )
         val lower = s.lowercase()
-        return keywords.filter { lower.contains(it) }.toSet()
+
+        // start with any keyword that appears in the string
+        val matches = keywords.filter { lower.contains(it) }.toMutableSet()
+
+        // exclude unhelpful combinations such as "album version" or "single version".
+        // these phrases are very generic and should not influence matching, so remove
+        // the individual words when they occur together.
+        if (lower.contains("album version")) {
+            matches.remove("album")
+            matches.remove("version")
+        }
+        if (lower.contains("single version")) {
+            matches.remove("single")
+            matches.remove("version")
+        }
+
+        // if both album and single somehow appeared together with version (e.g.
+        // "album version single version"), the above logic will have already
+        // stripped all three words. remaining set may be empty.
+        return matches
     }
 
     internal fun compareName(name1: String?, name2: String?): NameMatchType? {
@@ -1020,7 +1039,23 @@ class LyricsRepository(private val httpClient: HttpClient) {
         if (oneHasParen) {
             val b1 = n1.substringBefore('(').trim()
             val b2 = n2.substringBefore('(').trim()
-            if (b1 == b2) return NameMatchType.LOW
+            if (b1 == b2) {
+                // examine the text inside the parentheses of whichever name contains it
+                val parenText = if (n1.contains('(')) {
+                    n1.substringAfter('(').substringBefore(')')
+                } else {
+                    n2.substringAfter('(').substringBefore(')')
+                }
+                // if the parenthesized text contains any of the version/mix keywords
+                // (live, remix, edit etc.) we treat it as a weaker LOW match. otherwise
+                // it's likely just a translation or annotation, so consider it perfect.
+                val keywordsInParen = extractVersionKeywords(parenText)
+                return if (keywordsInParen.isNotEmpty()) {
+                    NameMatchType.LOW
+                } else {
+                    NameMatchType.PERFECT
+                }
+            }
         }
 
         if (n1.length == n2.length) {
@@ -1529,7 +1564,7 @@ class LyricsRepository(private val httpClient: HttpClient) {
             Timber.i("Auto-fetching lyrics for: $title - $artist")
             
             // 1. 先搜索所有来源
-            val searchResults = searchLyrics(title, artist)
+            var searchResults = searchLyrics(title, artist)
             
             if (searchResults.isEmpty()) {
                 Timber.w("No search results found for: $title - $artist")
@@ -1537,6 +1572,11 @@ class LyricsRepository(private val httpClient: HttpClient) {
                     isSuccess = false,
                     errorMessage = "未找到歌曲,请检查歌曲名和歌手名"
                 )
+            }
+
+            // 1b. 如果多于一个候选，按照匹配度+特性重新排序
+            if (searchResults.size > 1) {
+                searchResults = adjustResultsForFeatures(searchResults)
             }
             
             // 2. 先尝试 AMLL DB（只要有网易云候选就尝试，成功即优先使用）
@@ -1664,6 +1704,81 @@ class LyricsRepository(private val httpClient: HttpClient) {
                 errorMessage = "获取歌词出错: ${e.message}"
             )
         }
+    }
+
+    /**
+     * Fetch the raw lyrics for a candidate and analyze which features it supports.
+     * Used by UI when displaying custom candidates so we can show extra hints.
+     * This is intentionally lightweight – it reuses the same provider-specific
+     * fetch routines used by [getLyrics], then runs a quick scan on the parsed
+     * TTML object.
+     */
+    suspend fun getLyricsFeatures(
+        provider: String,
+        songId: String,
+        title: String? = null,
+        artist: String? = null
+    ): Set<LyricsFeature> {
+        val normalizedProvider = provider.lowercase()
+        val lyrics: TTMLLyrics? = when (normalizedProvider) {
+            "amll" -> getAMLL_TTMLLyrics(songId, title, artist)
+            "netease", "ncm" -> getNeteaseLyrics(songId, title, artist)
+            "qq", "qqmusic" -> getQQMusicLyrics(songId, title, artist)
+            "kugou" -> getKugouLyrics(songId, title, artist)
+            else -> null
+        }
+        return lyrics?.let { analyzeFeatures(it) } ?: emptySet()
+    }
+
+    /**
+     * 重新排序搜索结果，使匹配度相差不大的时功能多的靠前。
+     * 这是一个独立的辅助手段，主要给 fetchLyricsAuto 和测试使用。
+     */
+    internal suspend fun adjustResultsForFeatures(
+        results: List<LyricsSearchResult>
+    ): List<LyricsSearchResult> {
+        if (results.size <= 1) return results
+        val decorated = results.map { result ->
+            val features = getLyricsFeatures(result.provider, result.songId, result.title, result.artist)
+            result to features
+        }
+        return decorated.sortedWith(Comparator { a, b ->
+            val diff = a.first.confidence - b.first.confidence
+            if (diff != 0f) {
+                -diff.compareTo(0f)
+            } else {
+                b.second.size - a.second.size
+            }
+        }).map { it.first }
+    }
+
+    private fun analyzeFeatures(lyrics: TTMLLyrics): Set<LyricsFeature> {
+        val features = mutableSetOf<LyricsFeature>()
+        val lines = lyrics.lines
+        if (lines.any { it.isDuet }) features.add(LyricsFeature.DUET)
+        if (lines.any { it.isBG }) features.add(LyricsFeature.BACKGROUND)
+        if (lines.any { it.translation?.isNotBlank() == true }) features.add(LyricsFeature.TRANSLATION)
+        if (lines.any { it.transliteration?.isNotBlank() == true }) features.add(LyricsFeature.TRANSLITERATION)
+        // treat 'words' feature as present only if there is at least one line
+        // with more than one word, or the single word does not exactly match the
+        // line timing.  This prevents ordinary "line‑timed" lyrics from being
+        // flagged as word‑level.
+        val hasRealWords = lines.any { line ->
+            val w = line.words
+            if (w.isEmpty()) return@any false
+            // if there is only one word and its timing equals the line's timing,
+            // that's just a line marker, not a true word-level transcript.
+            if (w.size == 1 && w[0].startTime == line.startTime && w[0].endTime == line.endTime) {
+                false
+            } else {
+                true
+            }
+        }
+        if (hasRealWords) features.add(LyricsFeature.WORDS)
+        if (lines.zipWithNext().any { it.second.startTime < it.first.endTime }) {
+            features.add(LyricsFeature.OVERLAP)
+        }
+        return features
     }
 
     companion object {

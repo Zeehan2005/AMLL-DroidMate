@@ -24,7 +24,12 @@ data class CustomLyricsCandidate(
     val artist: String,
     val confidence: Float,
     val matchType: String,
-    val displayName: String
+    val displayName: String,
+    /**
+     * 特性集合, e.g. 对唱/背景/重叠/翻译/音译/逐字
+     * UI 需要在候选列表中显示这些功能。
+     */
+    val features: Set<com.amll.droidmate.domain.model.LyricsFeature> = emptySet()
 )
 
 class CustomLyricsViewModel(application: Application) : AndroidViewModel(application) {
@@ -46,6 +51,32 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     private val httpClient = ServiceLocator.provideHttpClient(application.applicationContext)
     private val lyricsRepository = ServiceLocator.provideLyricsRepository(application.applicationContext)
     private val lyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application.applicationContext)
+
+    // legacy comparator for individual updates; still used by appendCandidate
+    internal val candidateComparator = Comparator<CustomLyricsCandidate> { a, b ->
+        // provider priority first
+        val pa = providerPriority[a.provider.lowercase()] ?: Int.MAX_VALUE
+        val pb = providerPriority[b.provider.lowercase()] ?: Int.MAX_VALUE
+        if (pa != pb) return@Comparator pa - pb
+
+        val diff = a.confidence - b.confidence
+        if (kotlin.math.abs(diff) > CONFIDENCE_THRESHOLD) {
+            -diff.compareTo(0f)
+        } else {
+            b.features.size - a.features.size
+        }
+    }
+
+    // new comparator used for one‑shot sorting: ignore provider and sort purely
+    // by confidence then by the number of features supported.
+    internal val combinedComparator = Comparator<CustomLyricsCandidate> { a, b ->
+        val diff = a.confidence - b.confidence
+        if (diff != 0f) {
+            -diff.compareTo(0f)
+        } else {
+            b.features.size - a.features.size
+        }
+    }
 
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates
@@ -77,33 +108,59 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             _isSearching.value = true
             _errorMessage.value = null
             _candidates.value = emptyList()
-            val mutex = Mutex()
-            try {
-                // 优先插入缓存歌词，但仍然继续搜索远端候选
-                val cached = lyricsCacheRepository.findBySong(title, artist)
-                if (cached != null) {
-                    val candidate = CustomLyricsCandidate(
-                        provider = "cache",
-                        songId = cached.id,
-                        title = cached.title,
-                        artist = cached.artist,
-                        confidence = 1.0f,
-                        matchType = "", // 不需要显示
-                        displayName = "本地缓存"
-                    )
-                    appendCandidate(candidate, mutex)
-                }
 
-                // 无本地缓存，继续增量搜索远端候选
-                lyricsRepository.searchLyricsIncremental(title, artist) { result ->
-                    // 只在歌曲未切换时追加候选
+            // helper to add a candidate and trigger sort
+            suspend fun publishCandidate(candidate: CustomLyricsCandidate) {
+                // insert candidate without features
+                _candidates.value = (_candidates.value + candidate)
+                    .sortedWith(combinedComparator)
+            }
+
+            try {
+                // 缓存优先加入
+                lyricsCacheRepository.findBySong(title, artist)?.let { cached ->
                     if (currentSongKey == songKey) {
-                        appendCandidate(
-                            candidate = result.toCandidate(),
-                            mutex = mutex
+                        publishCandidate(
+                            CustomLyricsCandidate(
+                                provider = "cache",
+                                songId = cached.id,
+                                title = cached.title,
+                                artist = cached.artist,
+                                confidence = 1.0f,
+                                matchType = "",
+                                displayName = "本地缓存"
+                            )
                         )
                     }
                 }
+
+                // 增量搜索：每个来源的第一条结果到达后都会回调一次
+                lyricsRepository.searchLyricsIncremental(title, artist) { result ->
+                    if (currentSongKey != songKey) return@searchLyricsIncremental
+                    val candidate = result.toCandidate()
+                    viewModelScope.launch {
+                        publishCandidate(candidate)
+                        // fetch features in background and re-sort when ready
+                        val feats = runCatching {
+                            lyricsRepository.getLyricsFeatures(
+                                candidate.provider,
+                                candidate.songId,
+                                candidate.title,
+                                candidate.artist
+                            )
+                        }.getOrDefault(emptySet())
+                        if (currentSongKey == songKey) {
+                            _candidates.value = _candidates.value
+                                .map {
+                                    if (it.provider.equals(candidate.provider, true) && it.songId == candidate.songId) {
+                                        it.copy(features = feats)
+                                    } else it
+                                }
+                                .sortedWith(combinedComparator)
+                        }
+                    }
+                }
+
             } catch (e: Exception) {
                 Timber.e(e, "Failed to search candidates")
                 _errorMessage.value = "搜索候选歌词失败: ${e.message}"
@@ -169,6 +226,10 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     }
 
     companion object {
+        // threshold used to compare candidate confidences (must still be
+        // accessible inside candidateComparator which appears earlier in the file)
+        private const val CONFIDENCE_THRESHOLD = 0.15f
+
         /**
          * Given raw lyrics input return an appropriate "source" label that will
          * later be stored in the view model / message intent.  Files are tagged
@@ -260,11 +321,33 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             if (exists) return
 
             _candidates.value = (_candidates.value + candidate)
-                .sortedWith(
-                    compareBy<CustomLyricsCandidate> {
-                        providerPriority[it.provider.lowercase()] ?: Int.MAX_VALUE
-                    }.thenByDescending { it.confidence }
+                .sortedWith(candidateComparator)
+        }
+
+        // kick off a coroutine to resolve supported features; update candidate when ready
+        viewModelScope.launch {
+            val features = runCatching {
+                lyricsRepository.getLyricsFeatures(
+                    candidate.provider,
+                    candidate.songId,
+                    candidate.title,
+                    candidate.artist
                 )
+            }.getOrDefault(emptySet())
+
+            if (features.isNotEmpty()) {
+                mutex.withLock {
+                    _candidates.value = _candidates.value
+                        .map {
+                            if (it.provider.equals(candidate.provider, true) && it.songId == candidate.songId) {
+                                it.copy(features = features)
+                            } else {
+                                it
+                            }
+                        }
+                        .sortedWith(candidateComparator)
+                }
+            }
         }
     }
 
