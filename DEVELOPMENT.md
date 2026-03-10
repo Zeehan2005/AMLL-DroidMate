@@ -312,7 +312,7 @@ Timber.e("Error message")
 
 ## 许可证
 
-MIT License - 详见项目根目录的 LICENSE 文件
+详见项目根目录的 LICENSE 文件
 
 ## 联系方式
 

@@ -339,6 +339,3 @@ HttpClient(OkHttp) {
 - [AMLL TTML DB](https://github.com/amll-dev/amll-ttml-db) - 高质量逐字歌词数据库
 - [Steve-xmh](https://github.com/Steve-xmh) - AMLL 生态系统维护者
 
-## 许可证
-
-MIT License - 保持与 Unilyric 和 AMLL 项目一致
