@@ -165,6 +165,9 @@ fun MainScreen() {
     var autoUpdateDialogTitle by remember { mutableStateOf("") }
     var autoUpdateDialogMessage by remember { mutableStateOf("") }
     var autoUpdateDialogUrl by remember { mutableStateOf<String?>(null) }
+    // spinner state moved here so both embedded and fullscreen can access
+    var spinnerVisible by remember { mutableStateOf(false) }
+
     val useDarkSystemIcons = !isLyricsFullscreen &&
         MaterialTheme.colorScheme.background.luminance() > 0.5f
 
@@ -395,31 +398,67 @@ fun MainScreen() {
                 )
             }
 
-            if (isLoading) {
-                Box(
+            //  当正在加载歌词，或者当前歌词仍然不匹配正在播放的歌曲（说明下一首还未正确加载）时
+            //  都显示加载指示器。
+            val currentLyrics = lyrics
+            // avoid smart cast issues by capturing nowPlaying value locally
+            val playing = nowPlaying
+            val lyricsMatchCurrentSong = if (currentLyrics != null && playing != null) {
+                currentLyrics.metadata.title == playing.title &&
+                    currentLyrics.metadata.artist == playing.artist
+            } else {
+                true // 没有歌词或没有正在播放的歌曲，不能判定不匹配
+            }
+            // Show spinner while actively loading, or when lyrics exist but appear to mismatch the playing track.
+            // Once lyrics are nonempty and loading finished we can safely dismiss, avoiding stale spinning.
+            val shouldShowSpinner = when {
+                isLoading -> true
+                currentLyrics != null && currentLyrics.lines.isNotEmpty() && !isLoading -> false
+                playing != null && currentLyrics != null && !lyricsMatchCurrentSong -> true
+                else -> false
+            }
+
+            // ensure spinner is visible for a short minimum duration to avoid短闪
+            LaunchedEffect(shouldShowSpinner) {
+                if (shouldShowSpinner) {
+                    spinnerVisible = true
+                } else {
+                    delay(250L)
+                    spinnerVisible = false
+                }
+            }
+
+            // always render the card when not fullscreen; spinner and placeholder overlay inside it
+            if (!isLyricsFullscreen) {
+                // 即使歌词尚未加载也显示一个 WebView（由 LyricsVisualLayer 封装），
+                // 同时在 WebView 前端展示加载指示或提示文字。
+                val displayLyrics = currentLyrics ?:
+                    TTMLLyrics(
+                        metadata = com.amll.droidmate.domain.model.TTMLMetadata(
+                            title = "",
+                            artist = "",
+                            album = null,
+                            language = "ja",
+                            duration = 0L,
+                            source = "DroidMate"
+                        ),
+                        lines = emptyList()
+                    )
+
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 ) {
-                    CircularProgressIndicator()
-                }
-            } else if (!isLyricsFullscreen) {
-                val currentLyrics = lyrics
-                if (currentLyrics != null) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        )
-                    ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                         LyricsVisualLayer(
                             nowPlaying = nowPlaying,
-                            lyrics = currentLyrics,
+                            lyrics = displayLyrics,
                             currentTime = currentTime,
                             webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
@@ -430,20 +469,33 @@ fun MainScreen() {
                             amllDebugSource = "embedded",
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "选择歌词来显示 AMLL",
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                            fontSize = 16.sp,
-                            textAlign = TextAlign.Center
-                        )
+
+                        // placeholder text when lyrics not available
+                        if (currentLyrics == null && !spinnerVisible) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "选择歌词来显示 AMLL",
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                                    fontSize = 16.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        // spinner should overlay on top of webview but not hide it completely
+                        if (spinnerVisible) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
                     }
                 }
             } else {
@@ -509,8 +561,9 @@ fun MainScreen() {
         }
 
         val fullscreenLyrics = lyrics
+        // remain visible when in fullscreen **and** (lyrics exist or spinner is active)
         AnimatedVisibility(
-            visible = isLyricsFullscreen && lyrics != null,
+            visible = isLyricsFullscreen && (lyrics != null || spinnerVisible),
             enter = fadeIn(animationSpec = tween(260)) + scaleIn(
                 initialScale = 0.96f,
                 animationSpec = tween(260)
@@ -617,25 +670,52 @@ fun MainScreen() {
                         }
                     }
             ) {
-                if (fullscreenLyrics != null) {
-                    Card(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = RoundedCornerShape(0.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.Black)
+                // always show webview when in fullscreen, even if lyrics not loaded yet
+                val displayFulllyrics = fullscreenLyrics ?:
+                    TTMLLyrics(
+                        metadata = com.amll.droidmate.domain.model.TTMLMetadata(
+                            title = "",
+                            artist = "",
+                            album = null,
+                            language = "ja",
+                            duration = 0L,
+                            source = "DroidMate"
+                        ),
+                        lines = emptyList()
+                    )
+                Card(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = RoundedCornerShape(0.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black)
+                ) {
+                    LyricsVisualLayer(
+                        nowPlaying = nowPlaying,
+                        lyrics = displayFulllyrics,
+                        currentTime = currentTime,
+                        webViewReloadKey = webViewReloadKey,
+                        onLineSeek = { seekTime ->
+                            Timber.tag(MAIN_SCREEN_LOG_TAG).i("[fullscreen] onLineSeek($seekTime)")
+                            viewModel.seekTo(seekTime)
+                            resetHideTimer()
+                        },
+                        amllDebugSource = "fullscreen",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // spinner overlay with fade animation applies to fullscreen too
+                AnimatedVisibility(
+                    visible = spinnerVisible,
+                    enter = fadeIn(animationSpec = tween(200)),
+                    exit = fadeOut(animationSpec = tween(200)),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        LyricsVisualLayer(
-                            nowPlaying = nowPlaying,
-                            lyrics = fullscreenLyrics,
-                            currentTime = currentTime,
-                            webViewReloadKey = webViewReloadKey,
-                            onLineSeek = { seekTime ->
-                                Timber.tag(MAIN_SCREEN_LOG_TAG).i("[fullscreen] onLineSeek($seekTime)")
-                                viewModel.seekTo(seekTime)
-                                resetHideTimer()
-                            },
-                            amllDebugSource = "fullscreen",
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        CircularProgressIndicator()
                     }
                 }
 

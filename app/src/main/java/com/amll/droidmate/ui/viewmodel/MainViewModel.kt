@@ -160,8 +160,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _nowPlayingMusic.value = music
                 Timber.d("Now playing: ${music?.title} - ${music?.artist}")
                 
-                // 如果歌曲确实改变且有有效的歌曲信息，先尝试使用缓存
+                // 如果歌曲确实改变且有有效的歌曲信息，先清除旧歌词并尝试使用缓存
                 if (isMusicChanged && music != null) {
+                    // 清空上一首歌曲的歌词，以便 UI 可以在新的歌词加载期间显示加载动画
+                    _lyrics.value = null
+
                     // 兼容老旧酷狗缓存需要刷新空格的问题
                     val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
                     if (cached != null) {
