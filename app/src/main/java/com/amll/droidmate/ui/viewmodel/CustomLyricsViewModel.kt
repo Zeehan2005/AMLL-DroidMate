@@ -195,7 +195,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             id: String?
         ): String {
             // every provider uses the same template: 服务商：歌曲名 - 歌手名(id)
-            val providerName = providerDisplayName(provider, id)
+            val providerName = providerDisplayName(provider)
             return "$providerName：$title - $artist(${id ?: ""})"
         }
 
@@ -205,7 +205,12 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
          * If an ID is supplied (e.g. AMLL songId) it will be appended in parentheses
          * for providers where that makes sense.
          */
-        private fun providerDisplayName(provider: String, id: String? = null): String {
+        private fun providerDisplayName(provider: String): String {
+            // The UI list only shows a friendly name; IDs should not be
+            // appended directly after the provider name.  Previously we added
+            // the AMLL songId here which caused the title to read
+            // "AMLL TTML DB (12345)".  That was confusing and the ID is still
+            // surfaced elsewhere if needed so drop it from the display name.
             val base = when (provider.lowercase()) {
                 "netease", "ncm" -> "网易云音乐"
                 "qq", "qqmusic" -> "QQ音乐"
@@ -213,11 +218,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
                 "amll" -> "AMLL TTML DB"
                 else -> provider.uppercase()
             }
-            return if (!id.isNullOrBlank() && provider.lowercase() == "amll") {
-                "$base ($id)"
-            } else {
-                base
-            }
+            return base
         }
 
     }
@@ -277,7 +278,7 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             artist = artist,
             confidence = confidence,
             matchType = "",
-            displayName = Companion.providerDisplayName(provider, songId)
+            displayName = Companion.providerDisplayName(provider)
         )
     }
 
