@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -137,7 +138,7 @@ private fun SettingsPage(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "实时歌词通知",
+                text = "常驻通知实时歌词",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -149,13 +150,13 @@ private fun SettingsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.fillMaxWidth(0.78f)) {
-                        Text("常驻通知显示当前句歌词")
+                        Text("常驻通知实时歌词")
                         Text(
-                            text = """默认关闭，可在通知权限允许后实时更新。获得锁屏权限后可锁屏显示。
-暂停播放时通知仍保留但可一键清理。""",
+                            text = """需要通知权限。获得锁屏权限后可锁屏显示。""",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
@@ -201,7 +202,7 @@ private fun SettingsPage(
                         }
                     )
                     CardClickActionOption(
-                        title = "询问 (推荐)",
+                        title = "询问",
                         selected = selectedAction == CardClickAction.ASK,
                         onClick = {
                             selectedAction = CardClickAction.ASK
@@ -244,12 +245,13 @@ private fun SettingsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.fillMaxWidth(0.75f)) {
-                        Text("第一次点击上一首回到 0:00")
+                        Text("点击上一首回到 0:00")
                         Text(
-                            text = "启用后,点击上一首按钮会先回到歌曲开头,而不是直接跳转到上一首",
+                            text = "点击上一首按钮会先回到歌曲开头，而不是直接跳转到上一首。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
@@ -289,7 +291,7 @@ private fun SettingsPage(
                         Column(modifier = Modifier.fillMaxWidth(0.75f)) {
                             Text("自动检查更新")
                             Text(
-                                text = "启动后按频率自动检查 GitHub Release",
+                                text = "自动检查 GitHub Release",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                             )
@@ -308,7 +310,7 @@ private fun SettingsPage(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     CardClickActionOption(
-                        title = "正式版 (vX.Y.Z)",
+                        title = "正式版",
                         selected = updateChannel == UpdateChannel.STABLE,
                         onClick = {
                             updateChannel = UpdateChannel.STABLE
@@ -316,7 +318,7 @@ private fun SettingsPage(
                         }
                     )
                     CardClickActionOption(
-                        title = "预览版 (Alpha 时间戳)",
+                        title = "开发版",
                         selected = updateChannel == UpdateChannel.PREVIEW,
                         onClick = {
                             updateChannel = UpdateChannel.PREVIEW
@@ -366,11 +368,21 @@ private fun SettingsPage(
                 text = "通知访问权限（获取正在播放）",
                 style = MaterialTheme.typography.titleMedium
             )
+            Text(
+                text = "必需权限。用于获取正在播放信息。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            Text(
+                text = "滥用通知使用权危及安全，因此系统可能会弹窗阻止。AMLL DroidMate 是开源软件，您可以查看本应用的执行逻辑，因此在应用来源可靠的情况下无需感到担忧。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
             TextButton(
                 onClick = onOpenNotificationSettings,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("打开通知访问设置")
+                Text("转至“读取、回复和控制通知”")
             }
 
             Text(
@@ -430,7 +442,7 @@ private fun SettingsPage(
                                 showUpdateDialog = false
                             }
                         ) {
-                            Text("去更新")
+                            Text("查看详情")
                         }
                     } else {
                         TextButton(onClick = { showUpdateDialog = false }) {

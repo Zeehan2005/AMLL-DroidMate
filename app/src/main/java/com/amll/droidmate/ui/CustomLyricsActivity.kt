@@ -13,13 +13,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.Storage
 
 // icons are deprecated but AutoMirrored is unavailable; suppress warnings where used
 import androidx.compose.material3.Button
@@ -44,6 +46,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -137,6 +140,8 @@ private fun CustomLyricsPage(
                 if (inputStream != null) {
                     val fileContent = inputStream.bufferedReader().use { it.readText() }
                     manualText = fileContent
+                    // 自动应用导入的歌词
+                    viewModel.applyManualInput(fileContent, title, artist)
                 } else {
                     // Error reading file
                 }
@@ -175,7 +180,7 @@ private fun CustomLyricsPage(
                     context.startActivity(Intent(context, LyricsCacheActivity::class.java))
                 }) {
                     @Suppress("DEPRECATION")
-                    Icon(Icons.Default.TextSnippet, contentDescription = "缓存歌词")
+                    Icon(Icons.Default.Storage, contentDescription = "管理缓存歌词")
                 }
             }
         )
@@ -197,18 +202,22 @@ private fun CustomLyricsPage(
             }
 
             Text(
-                text = "候选歌词",
+                text = "选择歌词来源",
                 style = MaterialTheme.typography.titleMedium
             )
 
             if (isSearching && candidates.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
                     Text(
-                        text = "正在搜索更多候选...",
+                        text = "正在查询...",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -225,9 +234,10 @@ private fun CustomLyricsPage(
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CircularProgressIndicator()
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -241,20 +251,15 @@ private fun CustomLyricsPage(
                 }
             }
 
-            Text(
-                text = "手动输入（推荐 TTML，也支持 LRC/纯文本）",
-                style = MaterialTheme.typography.titleMedium
-            )
 
             OutlinedTextField(
                 value = manualText,
                 onValueChange = { manualText = it },
-                label = { Text("歌词文本") },
-                placeholder = { Text("可粘贴 TTML / LRC / 纯文本") },
+                label = { Text("手动输入") },
+                placeholder = { Text("推荐TTML，也支持其他格式。") },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                minLines = 8
+                    .fillMaxWidth(),
+                minLines = 1 // 减少行数以进一步降低高度
             )
 
             Row(
@@ -266,7 +271,7 @@ private fun CustomLyricsPage(
                     enabled = manualText.isNotBlank() && !isApplying,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (isApplying) "处理中..." else "应用到当前歌曲")
+                    Text(if (isApplying) "处理中..." else "应用")
                 }
                 Button(
                     onClick = { filePickerLauncher.launch("*/*") },
@@ -331,7 +336,7 @@ private fun CandidateItem(
                 enabled = !isApplying,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("使用此候选")
+                Text("应用")
             }
         }
     }

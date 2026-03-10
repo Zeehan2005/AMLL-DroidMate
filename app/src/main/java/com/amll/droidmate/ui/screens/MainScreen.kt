@@ -293,7 +293,7 @@ fun MainScreen() {
                                 leadingIcon = {
                                     Icon(Icons.Default.Refresh, contentDescription = null)
                                 },
-                                text = { Text("刷新") },
+                                text = { Text("刷新 WebView") },
                                 onClick = {
                                     Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
                                     webViewReloadKey += 1
@@ -352,7 +352,7 @@ fun MainScreen() {
                     },
                     dismissButton = {
                         TextButton(onClick = { showOpenAppDialog = false }) {
-                            Text("不操作")
+                            Text("忽略")
                         }
                     }
                 )
@@ -439,7 +439,7 @@ fun MainScreen() {
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "等待歌曲信息...",
+                            text = "选择歌词来显示 AMLL",
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                             fontSize = 16.sp,
                             textAlign = TextAlign.Center
@@ -938,15 +938,23 @@ fun PermissionStatusCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = if (notificationAccessGranted) {
-                    "通知访问已授权"
-                } else {
-                    "需要通知访问权限才能读取播放信息"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (notificationAccessGranted) {
+                        "通知访问已授权"
+                    } else {
+                        "需要通知访问权限才能正常使用此应用。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (!notificationAccessGranted) {
+                    Text(
+                        text = "滥用通知使用权危及安全，因此系统可能会弹窗阻止。AMLL DroidMate 是开源软件，您可以查看本应用的执行逻辑，因此在应用来源可靠的情况下无需感到担忧。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+            }
             if (!notificationAccessGranted) {
                 Spacer(modifier = Modifier.width(8.dp))
                 TextButton(onClick = onOpenNotificationAccessSettings) {

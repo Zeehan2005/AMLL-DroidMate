@@ -7,15 +7,20 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 
 // suppress icon deprecation where used
 import androidx.compose.material3.AlertDialog
@@ -109,7 +114,7 @@ private fun LyricsCachePage(
             },
             actions = {
                 TextButton(onClick = { showClearDialog = true }) {
-                    Text("一键删除")
+                    Text("删除所有")
                 }
             }
         )
@@ -117,7 +122,8 @@ private fun LyricsCachePage(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("搜索标题 / 歌手 / 来源") },
+            label = { Text("搜索") },
+            placeholder = { Text("输入 标题 / 歌手 / 来源") },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -183,41 +189,57 @@ private fun CacheEntryItem(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = entry.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "来源: ${entry.source}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "更新时间: ${formatTimestamp(entry.updatedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            )
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Button(onClick = onDelete) {
-                    Text("删除")
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = entry.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = entry.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "来源: ${entry.source}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "更新时间: ${formatTimestamp(entry.updatedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .width(56.dp)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
     }
 }
+
 
 private fun formatTimestamp(timestamp: Long): String {
     val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
