@@ -296,10 +296,12 @@ fun MainScreen() {
                                 leadingIcon = {
                                     Icon(Icons.Default.Refresh, contentDescription = null)
                                 },
-                                text = { Text("刷新 WebView") },
+                                text = { Text("刷新") },
                                 onClick = {
                                     Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
                                     webViewReloadKey += 1
+                                    // 额外从缓存再读一次歌词，防止歌曲切换过快导致 WebView 内歌词停留旧数据
+                                    viewModel.fetchLyrics()
                                     Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh handled, newKey=$webViewReloadKey")
                                     showMenu = false
                                 }

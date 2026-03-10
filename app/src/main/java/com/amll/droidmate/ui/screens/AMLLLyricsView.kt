@@ -98,8 +98,15 @@ fun AMLLLyricsView(
                         // Force one re-sync after page finishes to avoid losing early bridge calls.
                         lastModeValue = null
                         lastBackgroundProfileValue = null
-                        lastLyrics = null
-                        lastLyricsPayload = null
+                        // 页面刷新结束时不主动清空 lastLyrics，让我们知道是否还有有效歌词
+                        // lastLyrics = null
+                        // 页面刷新完成后如果我们之前有歌词 JSON 且当前仍然有 lyrics（不是因歌曲切换而清空），先立刻重新下发
+                        if (lastLyricsPayload != null && lastLyrics != null) {
+                            amllDebug("[$debugSource#$instanceId] reapplying lyrics payload after page finish")
+                            view.evaluateJavascript("window.updateLyrics && window.updateLyrics($lastLyricsPayload);", null)
+                        }
+                        // 不清空 payload，让 update() 继续根据 lyrics 对象决定重新生成
+                        // lastLyricsPayload = null
                         lastAlbumArtUri = null
                         lastFontConfigSignature = null
                         // 确保页面加载后背景仍然透明
