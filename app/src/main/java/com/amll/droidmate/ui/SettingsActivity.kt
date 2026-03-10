@@ -365,7 +365,7 @@ private fun SettingsPage(
             }
 
             Text(
-                text = "通知访问权限（获取正在播放）",
+                text = "通知访问权限",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
