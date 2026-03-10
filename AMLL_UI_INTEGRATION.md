@@ -88,6 +88,16 @@ Android.log(message)
 Android.onLineClick(lineIndex)
 ```
 
+> **注意**
+> 当用户点击某一行歌词以跳转播放位置时，宿主端应立即让 WebView 进入“seeking”状态并将时间设置为目标值。这样可以避免 JS 层在处理异步回调时发生快速滚动导致歌词“乱跑”的视觉问题。
+> 
+> 在 Kotlin/Java 端可以通过
+> ```kotlin
+> webView.evaluateJavascript("window.callPlayer && window.callPlayer('setIsSeeking', true);", null)
+> webView.evaluateJavascript("window.updateTime && window.updateTime($seekTime);", null)
+> ```
+> 等调用实现。
+
 ## AMLL 特性
 
 ### 视觉效果
@@ -96,6 +106,8 @@ Android.onLineClick(lineIndex)
    - 平滑的行级滚动
    - 当前行高亮放大
    - 渐变过渡效果
+   
+> ✅ 修复：用户在歌词区域滑动（手动滚动）后，行之间不再出现叠在一起的情况。内部每次计算布局时均保留至少 1px 的垂直间隔，并始终为每一行分配空间，避免了背景行隐藏时导致的折叠。
 
 2. **动态流体背景** (可选)
    - 根据专辑封面颜色生成

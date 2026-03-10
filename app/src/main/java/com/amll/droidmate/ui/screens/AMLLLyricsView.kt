@@ -141,9 +141,33 @@ fun AMLLLyricsView(
                 // 同时避免软件渲染导致的帧率问题
                 setLayerType(View.LAYER_TYPE_NONE, null)
 
+                // keep a reference to the WebView so we can send immediate commands back to
+                // the javascript bridge when the user initiates a seek via clicking a lyric.
+                val webViewRef = this
+
                 addJavascriptInterface(
                     AMLLInterface(debugSource, instanceId) { seekTime ->
                         amllInfo("[$debugSource#$instanceId] Bridge callback onLineSeek($seekTime), callbackPresent=${onLineSeekState.value != null}")
+
+                        // schedule a UI-thread action so that the webview can immediately
+                        // acknowledge the seek and prevent the "lyrics running around" effect.
+                        webViewRef.post {
+                            // tell the JS player we are seeking so it can suspend auto-scroll
+                            webViewRef.evaluateJavascript(
+                                "window.callPlayer && window.callPlayer('setIsSeeking', true);",
+                                null
+                            )
+
+                            // update the webview time to the target position right away. this
+                            // reduces the window where the old time would cause the view to
+                            // scroll back to the previous line before the new position arrives
+                            webViewRef.evaluateJavascript(
+                                "window.updateTime && window.updateTime($seekTime);",
+                                null
+                            )
+                        }
+
+                        // finally notify host view model so the audio actually seeks
                         onLineSeekState.value?.invoke(seekTime)
                     },
                     "Android"
