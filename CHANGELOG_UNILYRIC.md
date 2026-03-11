@@ -35,10 +35,13 @@ suspend fun getNeteaseLyrics(songId: String): TTMLLyrics?
 **酷狗音乐**
 ```kotlin
 suspend fun searchKugou(title: String, artist: String): LyricsSearchResult?
-suspend fun getKugouLyrics(hash: String): TTMLLyrics?
+suspend fun getKugouLyrics(idOrHash: String): TTMLLyrics?
 ```
 - 搜索API: `http://mobilecdn.kugou.com/api/v3/search/song`
 - 歌词API: `http://www.kugou.com/yy/index.php?r=play/getdata`
+- Kugou 搜索仍先获得歌曲 `hash`，但 `songId` 现在拼接为 `hash::proposalId`（proposalId 来源为歌词接口）。
+  - UI/调用方可显示两部分，但内部调用 `getKugouLyrics` 只会使用 hash。
+  - `getKugouLyrics` 自动拆分组合 ID 并兼容旧的纯 hash 或纯数字值。
 - 格式: Base64(可能) → LRC → TTML
 - 特点: 使用hash作为歌曲ID
 

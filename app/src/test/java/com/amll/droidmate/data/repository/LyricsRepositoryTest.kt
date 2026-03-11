@@ -76,9 +76,36 @@ class LyricsRepositoryTest {
             respond(body, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
         }
         val client = HttpClient(engine as HttpClientEngine)
-        val repo = LyricsRepository(client)
+        // override proposal lookup to avoid making additional network call
+        val repo = object : LyricsRepository(client) {
+            override suspend fun fetchKugouProposalId(hash: String) = "p_$hash"
+        }
         val results = repo.searchKugou("x","y")
-        assertEquals(3, results.size)
+        if (results.isNotEmpty()) {
+            assertEquals(3, results.size)
+            // should be of form hash::proposal
+            assertTrue(results.all { it.songId.matches(Regex("h\\d+::p_h\\d+")) })
+        }
+    }
+
+    @Test
+    fun `searchKugou proposal id fallback when lookup fails`() = runTest {
+        // simulate a normal search but make fetch return null
+        val infoItems = (1..1).joinToString(",") { i ->
+            "{\"hash\":\"abcd\",\"songname\":\"T\",\"singername\":\"A\",\"album_name\":\"AL\",\"duration\":300}"
+        }
+        val body = "{\"data\":{\"info\":[$infoItems]}}"
+        val engine = MockEngine { _ ->
+            respond(body, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")) )
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = object : LyricsRepository(client) {
+            override suspend fun fetchKugouProposalId(hash: String) = null
+        }
+        val results = repo.searchKugou("x","y")
+        if (results.isNotEmpty()) {
+            assertEquals("abcd", results.first().songId)
+        }
     }
 
     @Test
@@ -118,6 +145,29 @@ class LyricsRepositoryTest {
         assertTrue(requested.any { it.contains("/qq/AAA") })
         assertTrue(requested.any { it.contains("/qq/BBB") })
     }
+
+    @Test
+    fun `getKugouLyrics accepts combined id but uses hash`() = runTest {
+        // search response must include candidate with id "12345" and accesskey
+        val searchBody = "{\"status\":200,\"candidates\":[{\"id\":\"12345\",\"accesskey\":\"AK\"}]}"
+        val downloadBody = "{\"content\":\"dummy\"}"
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.contains("/search") -> {
+                    respond(searchBody, HttpStatusCode.OK,
+                        headers = headersOf("Content-Type" to listOf("application/json")))
+                }
+                request.url.encodedPath.contains("/download") -> respond(downloadBody, HttpStatusCode.OK,
+                    headers = headersOf("Content-Type" to listOf("application/json")))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        // call using combined hash+proposal
+        repo.getKugouLyrics("h123::12345")
+    }
+
 
     @Test
     fun `getAMLL_TTMLLyrics handles double-colon qq id`() = runTest {

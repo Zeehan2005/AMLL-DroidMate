@@ -633,6 +633,47 @@ open class LyricsRepository(
     /**
      * 从酷狗音乐搜索歌词
      */
+    // cache for lazily mapping song hashes -> proposal id (first lookup may issue network request)
+    private val kugouHashToProposalCache = mutableMapOf<String, String?>()
+
+    /**
+     * Helper used by both the public search and internal flows. Given a
+     * kugou song hash (the value returned by the v3/search/song API), this
+     * will invoke the lyrics search endpoint once and return the "id"
+     * field of the first candidate.  The ID is what the official lyrics API
+     * refers to as the proposal/lyric id; we store it as the songId in
+     * LyricsSearchResult instead of the hash.
+     *
+     * The implementation is `open` so tests can override and avoid network
+     * calls.
+     */
+    protected open suspend fun fetchKugouProposalId(hash: String): String? {
+        // quick cache hit first
+        kugouHashToProposalCache[hash]?.let { return it }
+
+        try {
+            val json = Json { ignoreUnknownKeys = true }
+            val resp = httpClient.get("https://lyrics.kugou.com/search") {
+                parameter("ver", "1")
+                parameter("man", "yes")
+                parameter("client", "pc")
+                parameter("keyword", "")
+                parameter("hash", hash)
+            }
+            if (!resp.status.isSuccess()) return null
+            val body = resp.body<String>()
+            val searchJson = json.parseToJsonElement(body).jsonObject
+            val candidates = searchJson["candidates"]?.jsonArray
+            val id = candidates?.getOrNull(0)?.jsonObject?.get("id")?.jsonPrimitive?.content
+            kugouHashToProposalCache[hash] = id
+            return id
+        } catch (e: Exception) {
+            Timber.e(e, "Error fetching proposal id for kugou hash $hash")
+            kugouHashToProposalCache[hash] = null
+            return null
+        }
+    }
+
     suspend fun searchKugou(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
@@ -677,6 +718,7 @@ open class LyricsRepository(
                 val albumName = songObj["album_name"]?.jsonPrimitive?.content
                 val durationSec = songObj["duration"]?.jsonPrimitive?.longOrNull
 
+
                 // 检查必要字段
                 if (songHash == null || songTitle == null || singerName == null || durationSec == null) {
                     Timber.d("Candidate #$index: Missing required fields (hash=$songHash, title=$songTitle, artist=$singerName, dur=$durationSec)")
@@ -700,9 +742,18 @@ open class LyricsRepository(
                 Timber.d("  -> Evaluation: confidence=${matchEval.confidence}, match=${matchEval.matchType}(score=${matchType.score})")
 
                 if (matchType.score >= MatchType.VERY_LOW.score) {
+                    // always store hash internally; for display we append proposal if available
+                    val proposal = fetchKugouProposalId(songHash)
+                    // format: "<hash>" or "<hash>::<proposal>" (numeric id)
+                    val idToStore = if (!proposal.isNullOrBlank()) {
+                        "$songHash::$proposal"
+                    } else songHash
+                    if (proposal != null) {
+                        Timber.d("Converted kugou hash $songHash -> proposal id $proposal")
+                    }
                     candidates += LyricsSearchResult(
                         provider = "kugou",
-                        songId = songHash,
+                        songId = idToStore,
                         title = songTitle,
                         artist = singerName,
                         confidence = matchEval.confidence,
@@ -723,11 +774,26 @@ open class LyricsRepository(
     /**
      * 从酷狗音乐获取歌词内容
      */
-    open suspend fun getKugouLyrics(hash: String, title: String? = null, artist: String? = null): TTMLLyrics? {
+    /**
+     * `hash` parameter historically was the 32‑char song hash returned by the
+     * v3/search/song endpoint.  After searchKugou switched to storing the
+     * lyrics API "proposal"/id we may receive either that numeric id or an
+     * old-style hash here.  The code below handles both: if the string is
+     * all digits we treat it as a proposal and later make sure to pick the
+     * matching candidate; otherwise we still query by hash and take the
+     * first result as before.
+     */
+    open suspend fun getKugouLyrics(idOrHash: String, title: String? = null, artist: String? = null): TTMLLyrics? {
         return try {
             // 基于 Unilyric 的实现
             // https://lyrics.kugou.com 是官方歌词 API
             
+            // if the caller passed a combined id, split it; the first segment is
+            // always the original song hash that the service expects for queries.
+            val hash = idOrHash.substringBefore("::")
+            val displayPart = idOrHash.substringAfter("::", "")
+
+            val isNumericId = displayPart.all { it.isDigit() }
             // Step 1: 搜索歌词候选（使用 hash）
             val searchResponse = httpClient.get("https://lyrics.kugou.com/search") {
                 parameter("ver", "1")
@@ -755,8 +821,18 @@ open class LyricsRepository(
                 return null
             }
             
-            // Step 2: 获取第一个候选（最相关的）的 id 和 accesskey
-            val candidate = candidates[0].jsonObject
+            // Step 2: 选出合适的候选。如果调用方提供了数字 ID，尝试匹配；
+            // 否则直接取第一个。
+            val candidate = if (isNumericId && displayPart.isNotEmpty()) {
+                candidates.firstOrNull { it.jsonObject["id"]?.jsonPrimitive?.content == displayPart }
+                    ?.jsonObject
+                    ?: run {
+                        Timber.w("Numeric kugou ID $displayPart not found in search results")
+                        return null
+                    }
+            } else {
+                candidates[0].jsonObject
+            }
             val lyricId = candidate["id"]?.jsonPrimitive?.content ?: run {
                 Timber.w("No lyrics ID in candidate")
                 return null
@@ -811,7 +887,7 @@ open class LyricsRepository(
                 artist = artist ?: "Unknown"
             )
             
-            Timber.i("Successfully fetched and decrypted Kugou lyrics for: $hash")
+            Timber.i("Successfully fetched and decrypted Kugou lyrics for: $idOrHash")
             return ttml
             
         } catch (e: Exception) {
