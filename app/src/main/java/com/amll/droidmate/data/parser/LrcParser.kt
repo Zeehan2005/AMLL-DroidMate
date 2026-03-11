@@ -45,17 +45,22 @@ object LrcParser {
             }
         }
 
+        // determine global offset from metadata
+        val offsetMs = metadata["offset"]?.firstOrNull()?.toLongOrNull() ?: 0L
+
         val sorted = entries.sortedBy { it.timestampMs }
         val finalLines = mutableListOf<LyricLine>()
         var i = 0
         while (i < sorted.size) {
-            val startMs = sorted[i].timestampMs
-            val groupEndIndex = sorted.subList(i, sorted.size).indexOfFirst { it.timestampMs != startMs }
+            val startMsOriginal = sorted[i].timestampMs
+            val startMs = startMsOriginal + offsetMs
+            val groupEndIndex = sorted.subList(i, sorted.size).indexOfFirst { it.timestampMs != startMsOriginal }
                 .let { if (it == -1) sorted.size else i + it }
 
             val group = sorted.subList(i, groupEndIndex)
-            val endMs = sorted.getOrNull(groupEndIndex)?.timestampMs?.coerceAtLeast(startMs)
-                ?: (startMs + DEFAULT_LAST_LINE_DURATION_MS)
+            val endMsOriginal = sorted.getOrNull(groupEndIndex)?.timestampMs?.coerceAtLeast(startMsOriginal)
+                ?: (startMsOriginal + DEFAULT_LAST_LINE_DURATION_MS)
+            val endMs = endMsOriginal + offsetMs
 
             val meaningful = group.filter { it.text.isNotEmpty() }
             if (meaningful.isNotEmpty()) {

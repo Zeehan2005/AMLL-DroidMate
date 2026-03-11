@@ -52,6 +52,18 @@ object KrcParser {
         val auxiliaryData = extractAuxiliaryDataFromKrc(content)
         var auxLineIndex = 0
         
+        // look for optional global offset metadata (milliseconds)
+        var globalOffsetMs = 0L
+        for (lineStr in contentLines) {
+            val trimmed = lineStr.trim()
+            if (trimmed.startsWith("[offset:", ignoreCase = true)) {
+                val num = trimmed.removePrefix("[offset:").removeSuffix("]").trim()
+                globalOffsetMs = num.toLongOrNull() ?: 0L
+                Timber.i("KRC global offset metadata: $globalOffsetMs ms")
+                break
+            }
+        }
+        
         for ((index, lineStr) in contentLines.withIndex()) {
             val trimmed = lineStr.trim()
             if (trimmed.isEmpty()) continue
@@ -61,13 +73,27 @@ object KrcParser {
             
             try {
                 parseSingleLine(trimmed)?.let { parsedLine ->
+                    // apply offset
+                    val shiftedLine = if (globalOffsetMs != 0L) {
+                        parsedLine.copy(
+                            startTime = parsedLine.startTime + globalOffsetMs,
+                            endTime = parsedLine.endTime + globalOffsetMs,
+                            words = parsedLine.words.map { w ->
+                                w.copy(
+                                    startTime = w.startTime + globalOffsetMs,
+                                    endTime = w.endTime + globalOffsetMs
+                                )
+                            }
+                        )
+                    } else parsedLine
+
                     val translation = auxiliaryData.translations.getOrNull(auxLineIndex)
                         ?.takeIf { it.isNotBlank() }
                     val romanization = auxiliaryData.romanizations.getOrNull(auxLineIndex)
                         ?.takeIf { it.isNotBlank() }
 
                     lines.add(
-                        parsedLine.copy(
+                        shiftedLine.copy(
                             translation = translation,
                             transliteration = romanization
                         )
@@ -224,6 +250,7 @@ object KrcParser {
                line.startsWith("[ti:") ||
                line.startsWith("[ar:") ||
                line.startsWith("[al:") ||
-               line.startsWith("[by:")
+               line.startsWith("[by:") ||
+               line.startsWith("[kana:") // phonetic metadata often appears in decrypted KRC
     }
 }

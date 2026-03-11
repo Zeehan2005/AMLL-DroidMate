@@ -31,6 +31,18 @@ object EnhancedLrcParser {
         val lines = mutableListOf<LyricLine>()
         val contentLines = content.lines()
         
+        // extract optional global offset
+        var offsetMs = 0L
+        for (lineStr in contentLines) {
+            val trimmed = lineStr.trim()
+            if (trimmed.startsWith("[offset:", ignoreCase = true)) {
+                val num = trimmed.removePrefix("[offset:").removeSuffix("]").trim()
+                offsetMs = num.toLongOrNull() ?: 0L
+                Timber.i("Enhanced LRC global offset metadata: $offsetMs ms")
+                break
+            }
+        }
+
         for ((index, lineStr) in contentLines.withIndex()) {
             val trimmed = lineStr.trim()
             if (trimmed.isEmpty()) continue
@@ -45,6 +57,21 @@ object EnhancedLrcParser {
             }
         }
         
+        if (offsetMs != 0L) {
+            return lines.map { line ->
+                line.copy(
+                    startTime = line.startTime + offsetMs,
+                    endTime = line.endTime + offsetMs,
+                    words = line.words.map { w ->
+                        w.copy(
+                            startTime = w.startTime + offsetMs,
+                            endTime = w.endTime + offsetMs
+                        )
+                    }
+                )
+            }.sortedBy { it.startTime }
+        }
+
         return lines.sortedBy { it.startTime }
     }
     

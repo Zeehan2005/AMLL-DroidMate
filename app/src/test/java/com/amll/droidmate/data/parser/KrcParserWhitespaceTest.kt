@@ -34,4 +34,21 @@ class KrcParserWhitespaceTest {
         assertEquals("pin yin one", lines[0].transliteration)
         assertEquals("pin yin two", lines[1].transliteration)
     }
+
+    @Test
+    fun applies_global_offset_metadata() {
+        val content = """
+            [offset:500]
+            [0,1000]<0,500,0>a<500,500,0>b
+        """.trimIndent()
+
+        val lines = KrcParser.parse(content)
+
+        assertEquals(1, lines.size)
+        assertEquals(500, lines[0].startTime)
+        assertEquals(1500, lines[0].endTime)
+        assertEquals(500, lines[0].words[0].startTime)
+        assertEquals(1000, lines[0].words[0].endTime)
+        assertEquals(1000, lines[0].words[1].startTime)
+    }
 }

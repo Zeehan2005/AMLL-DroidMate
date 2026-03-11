@@ -1030,11 +1030,11 @@ open class LyricsRepository(
             "instrumental", "extended", "karaoke", "remastered", "rework",
             "re-edit", "unplugged", "piano", "strings",
             "orchestral", "demo", "remaster", "ringtone", "slowed", "sped up", "slow", "fast",
-            "tiktok"
+            "tiktok", 
             // Chinese equivalents / additional keywords
             "混音", "现场", "演唱会", "晚会", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
             "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作", "片段",
-            "铃声", "慢速", "快速", "加速", "减速"，"抖音"
+            "铃声", "慢速", "快速", "加速", "减速", "抖音"
         )
         val lower = s.lowercase()
 
@@ -1684,7 +1684,8 @@ open class LyricsRepository(
      *   若传入且搜索候选在置信度/功能上完全相等，则有助于优先选择
      *   与当前来源相关的结果（如网易、QQ、酷狗）。
      */
-    suspend fun fetchLyricsAuto(
+    // Made open for unit and integration tests to allow custom behavior
+    open suspend fun fetchLyricsAuto(
         title: String,
         artist: String,
         currentSourceName: String? = null

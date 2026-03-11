@@ -46,23 +46,24 @@ enum class LyricsFormat(val extension: String, val displayName: String) {
                 return YRC
             }
             
-            // QRC: 标准 [lineTs] + (start,duration)
-            if (Regex("""^\[\d+,\d+]""", RegexOption.MULTILINE).containsMatchIn(trimmed) &&
-                Regex("""\(\d+,\d+\)""").containsMatchIn(trimmed)) {
-                return QRC
-            }
-            
-            // KRC: 两种识别方式
-            // 1. 带 metadata: [language:], [id:], [hash:] 等
+            // KRC: 两种识别方式。放在 QRC 检测之前，以避免被类似模式误判。
+            // 1. 带 metadata: [language:], [id:], [hash:] 等，也包括常见的 [kana:] 行
             // 2. 不带 metadata 但有特征: [毫秒,毫秒]<毫秒,毫秒,0>（酷狗解密后的格式）
             if (trimmed.lines().any { 
                 it.startsWith("[language:") || 
                 it.startsWith("[id:") ||
-                it.startsWith("[hash:")
+                it.startsWith("[hash:") ||
+                it.startsWith("[kana:")
             } || 
             (Regex("""^\[\d{4,},\d+]""", RegexOption.MULTILINE).containsMatchIn(trimmed) &&
                 Regex("""<\d+,\d+,0>""").containsMatchIn(trimmed))) {
                 return KRC
+            }
+            
+            // QRC: 标准 [lineTs] + (start,duration)
+            // 现在要求二者出现在同一行，避免从 [kana:] 等元数据中误判
+            if (Regex("""^\[\d+,\d+].*\(\d+,\d+\)""", RegexOption.MULTILINE).containsMatchIn(trimmed)) {
+                return QRC
             }
             
             // Enhanced LRC - 逐字时间戳 <mm:ss.ms>word

@@ -17,13 +17,29 @@ object TTMLParser {
     private val factory = DocumentBuilderFactory.newInstance()
     
     fun parse(content: String): List<LyricLine> {
+        if (content.isBlank()) return emptyList()
+
+        val builder = factory.newDocumentBuilder()
+
+        // attempt a normal parse first; if it fails we may be dealing with
+        // malformed metadata tags (common in Apple-supplied TTML) and we'll
+        // retry after sanitizing the input.
+        fun tryParse(input: String): List<LyricLine> {
+            val doc = builder.parse(input.byteInputStream())
+            return parseTTMLDocument(doc)
+        }
+
         return try {
-            val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(content.byteInputStream())
-            parseTTMLDocument(doc)
+            tryParse(content)
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse TTML content")
-            emptyList()
+            Timber.w(e, "Initial TTML parse failed, trying sanitization")
+            val sanitized = sanitizeTTMLContent(content)
+            return try {
+                tryParse(sanitized)
+            } catch (e2: Exception) {
+                Timber.e(e2, "Failed to parse TTML content after sanitization")
+                emptyList()
+            }
         }
     }
     
@@ -533,5 +549,17 @@ object TTMLParser {
             Timber.e(e, "Failed to parse time string: $timeStr")
             0L
         }
+    }
+
+    /**
+     * Hacky pre‑parser step to strip dangerous <amll:meta> elements which often
+     * contain unescaped characters or malformed attributes. Lyrics extraction
+     * does not rely on them, and removing them resolves XML exceptions.
+     */
+    private fun sanitizeTTMLContent(raw: String): String {
+        return raw.replace(
+            Regex("<amll:meta\\b[^>]*?(?:\\/>|>.*?<\\/amll:meta>)", RegexOption.DOT_MATCHES_ALL),
+            ""
+        )
     }
 }

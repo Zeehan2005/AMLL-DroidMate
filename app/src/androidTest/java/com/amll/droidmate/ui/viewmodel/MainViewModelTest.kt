@@ -12,6 +12,18 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import kotlinx.coroutines.test.runTest
+
+// network/util imports used by some tests
+import io.ktor.client.*
+import io.ktor.client.engine.*
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.*
+
+import com.amll.droidmate.data.repository.LyricsRepository
+import com.amll.droidmate.domain.model.LyricsResult
+import kotlinx.coroutines.test.advanceUntilIdle
+
 import org.junit.runner.RunWith
 
 /**
@@ -131,7 +143,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `fetchLyrics uses package name to bias search`() = runTest {
+    fun fetchLyrics_packageNameBias() = runTest {
         val captured = mutableListOf<String?>()
         val fakeRepo = object : LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) } as HttpClientEngine)) {
             override suspend fun fetchLyricsAuto(
@@ -151,7 +163,7 @@ class MainViewModelTest {
         // update the nowPlayingMusic directly so fetchLyrics uses it
         viewModel._nowPlayingMusic.value = playing
         viewModel.fetchLyrics()
-        kotlinx.coroutines.test.advanceUntilIdle()
+        advanceUntilIdle()
         assertEquals(1, captured.size)
         assertTrue(captured[0]?.contains("网易") == true || captured[0]?.contains("netease", ignoreCase = true) == true)
     }

@@ -49,4 +49,23 @@ class TTMLWhitespacePreserveTest {
         assertEquals("My Title", parsed?.metadata?.title)
         assertEquals("My Artist", parsed?.metadata?.artist)
     }
+
+    @Test
+    fun parser_skips_malformed_amll_meta_tags() {
+        // this mimics the SAXParseException seen in logs: an amll:meta tag with
+        // an unescaped quote/attribute causes the XML parser to fail.
+        // build a valid TTML string; triple quotes allow raw quotes so no escapes
+        val ttml = """<?xml version="1.0" encoding="UTF-8"?>""" +
+            """<tt xmlns="http://www.w3.org/ns/ttml" xmlns:amll="http://www.example.com/ns/amll">""" +
+            """<head><metadata>""" +
+            """<amll:meta key='title' value='不将就 (电影' 何以笙箫默='http://music.apple.com/lyric-ttml-internal'/>""" +
+            """</metadata></head><body><div>""" +
+            """<p begin="00:00.000" end="00:01.000">Test</p>""" +
+            """</div></body></tt>"""
+
+        // ensure parser can handle the malformed metadata without throwing
+        val lines = TTMLParser.parse(ttml)
+        assertEquals(1, lines.size)
+        assertEquals("Test", lines[0].text)
+    }
 }
