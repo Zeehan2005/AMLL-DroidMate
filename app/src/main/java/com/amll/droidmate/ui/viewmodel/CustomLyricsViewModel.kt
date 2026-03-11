@@ -104,7 +104,17 @@ class CustomLyricsViewModel @JvmOverloads constructor(
             return featDiff
         }
 
-        // 3. current source bias
+        // 3. prefer entries from AMLL database over others (added per request)
+        //    this sits between feature comparison and source bias
+        val aAml = a.provider.equals("amll", true)
+        val bAml = b.provider.equals("amll", true)
+        if (aAml != bAml) {
+            val res = if (aAml) -1 else 1
+            Timber.d("compareCandidates amll db pref: $a vs $b -> $res")
+            return res
+        }
+
+        // 4. current source bias
         currentSourceName?.let { source ->
             val lower = source.lowercase()
             val priorityList = when {
