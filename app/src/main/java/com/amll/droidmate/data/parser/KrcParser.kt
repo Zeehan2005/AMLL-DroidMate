@@ -75,7 +75,7 @@ object KrcParser {
                     auxLineIndex += 1
                 }
             } catch (e: Exception) {
-                Timber.w(e, "Failed to parse KRC line $index: $trimmed")
+                Timber.f(e, "Failed to parse KRC line $index: $trimmed")
             }
         }
         

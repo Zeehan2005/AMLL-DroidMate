@@ -25,7 +25,7 @@ class MediaInfoService(private val context: Context) {
     private val mediaSessionManager: MediaSessionManager? = try {
         context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
     } catch (e: Exception) {
-        Timber.e(e, "Failed to get MediaSessionManager")
+        Timber.f(e, "Failed to get MediaSessionManager")
         null
     }
 
@@ -39,7 +39,7 @@ class MediaInfoService(private val context: Context) {
      * 启动监听
      */
     fun startListening() {
-        Timber.d("Starting media info listener")
+        Timber.i("Starting media info listener")
         updateMediaInfo()
         scheduleNextUpdate()
     }
@@ -48,7 +48,7 @@ class MediaInfoService(private val context: Context) {
      * 停止监听
      */
     fun stopListening() {
-        Timber.d("Stopping media info listener")
+        Timber.i("Stopping media info listener")
         updateRunnable?.let { handler.removeCallbacks(it) }
     }
     
@@ -93,7 +93,7 @@ class MediaInfoService(private val context: Context) {
                                 ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_ART_URI)
                         }
                     } catch (e: Exception) {
-                        Timber.w(e, "Failed to get album art")
+                        Timber.f(e, "Failed to get album art")
                         null
                     }
                     
@@ -116,11 +116,11 @@ class MediaInfoService(private val context: Context) {
                 currentController = null
             }
         } catch (e: SecurityException) {
-            Timber.w("Permission denied to access media sessions")
+            Timber.f("Permission denied to access media sessions")
             // 尝试通过其他方式获取
             updateMediaInfoViaContentResolver()
         } catch (e: Exception) {
-            Timber.e(e, "Error updating media info")
+            Timber.f(e, "Error updating media info")
         }
     }
     
@@ -131,7 +131,7 @@ class MediaInfoService(private val context: Context) {
         try {
             // 注: 这是一个简化的实现
             // 实际应用可能需要使用 MediaStore 或其他方式
-            Timber.d("Attempting to get media info via ContentResolver")
+            Timber.i("Attempting to get media info via ContentResolver")
         } catch (e: Exception) {
             Timber.e(e, "Error getting media info via ContentResolver")
         }
@@ -163,7 +163,7 @@ class MediaInfoService(private val context: Context) {
             Timber.d("Saved album art to cache: $uri")
             uri
         } catch (e: Exception) {
-            Timber.e(e, "Failed to save album art to cache")
+            Timber.f(e, "Failed to save album art to cache")
             null
         }
     }
@@ -185,28 +185,28 @@ class MediaInfoService(private val context: Context) {
      */
     fun play() {
         currentController?.transportControls?.play()
-        Timber.d("Play command sent")
+        Timber.i("Play command sent")
     }
     
     fun pause() {
         currentController?.transportControls?.pause()
-        Timber.d("Pause command sent")
+        Timber.i("Pause command sent")
     }
     
     fun skipToNext() {
         currentController?.transportControls?.skipToNext()
-        Timber.d("Skip to next command sent")
+        Timber.i("Skip to next command sent")
     }
     
     fun skipToPrevious() {
         currentController?.transportControls?.skipToPrevious()
-        Timber.d("Skip to previous command sent")
+        Timber.i("Skip to previous command sent")
     }
     
     fun seekTo(position: Long) {
         val controller = currentController
         if (controller == null) {
-            Timber.w("Seek ignored: no active MediaController, target=$position ms")
+            Timber.e("Seek ignored: no active MediaController, target=$position ms")
             return
         }
 
@@ -218,12 +218,12 @@ class MediaInfoService(private val context: Context) {
     
     fun fastForward() {
         currentController?.transportControls?.fastForward()
-        Timber.d("Fast forward command sent")
+        Timber.i("Fast forward command sent")
     }
     
     fun rewind() {
         currentController?.transportControls?.rewind()
-        Timber.d("Rewind command sent")
+        Timber.i("Rewind command sent")
     }
     
     companion object {

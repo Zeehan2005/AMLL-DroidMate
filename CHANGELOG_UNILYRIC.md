@@ -223,11 +223,6 @@ AMLL: API Response → TTML (直接使用 parseTTML())
 - `SerializationException` - JSON解析失败
 - `Exception` - 通用异常兜底
 
-使用 Timber 日志:
-- `Timber.i()` - 成功信息
-- `Timber.d()` - 调试信息
-- `Timber.w()` - 警告(单个来源失败)
-- `Timber.e()` - 错误(所有来源失败)
 
 ## 编译验证
 

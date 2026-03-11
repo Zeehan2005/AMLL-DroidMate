@@ -41,7 +41,7 @@ object EnhancedLrcParser {
             try {
                 parseSingleLine(trimmed, contentLines, index)?.let { lines.add(it) }
             } catch (e: Exception) {
-                Timber.w(e, "Failed to parse Enhanced LRC line $index: $trimmed")
+                Timber.f(e, "Failed to parse Enhanced LRC line $index: $trimmed")
             }
         }
         

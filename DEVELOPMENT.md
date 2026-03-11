@@ -275,11 +275,7 @@ A: 可以通过 Room 数据库缓存歌词实现离线支持
 
 使用 Timber 进行日志记录：
 
-```kotlin
-Timber.d("Debug message")
-Timber.i("Info message")
-Timber.w("Warning message")
-Timber.e("Error message")
+
 ```
 
 ## 部署和发布

@@ -52,9 +52,9 @@ class MainActivity : ComponentActivity() {
                         // 更新到全局ThemeManager，供所有Activity使用
                         DynamicThemeManager.updateColorScheme(colors)
                         if (colors != null) {
-                            Timber.d("Dynamic colors extracted and applied globally")
+                            Timber.i("Dynamic colors extracted and applied globally")
                         } else {
-                            Timber.d("Failed to extract colors, using default theme")
+                            Timber.e("Failed to extract colors, using default theme")
                         }
                     } catch (e: Exception) {
                         Timber.e(e, "Error extracting colors from album art")

@@ -58,7 +58,7 @@ object UnifiedLyricsParser {
         return try {
             // 检测格式
             val format = LyricsFormat.detect(content)
-            Timber.d("Detected lyrics format: $format")
+            Timber.i("Detected lyrics format: $format")
             
             // 使用相应的解析器解析
             val lines = when (format) {
@@ -96,7 +96,7 @@ object UnifiedLyricsParser {
                 }
                 LyricsFormat.TTML -> {
                     // TTML 格式使用专用解析器
-                    Timber.d("Parsing TTML format")
+                    Timber.i("Parsing TTML format")
                     Timber.d("[BG-LYRICS-DEBUG] Unified TTML input has x-bg=${content.contains("ttm:role=\"x-bg\"")}, x-translation=${content.contains("ttm:role=\"x-translation\"")}, length=${content.length}")
                     val parsed = TTMLParser.parse(content)
                     Timber.d("[BG-LYRICS-DEBUG] Unified TTML parsed summary: ${summarizeBgLines(parsed)}")
@@ -111,7 +111,7 @@ object UnifiedLyricsParser {
             }
             
             if (lines.isEmpty()) {
-                Timber.w("No lyrics lines parsed")
+                Timber.f("No lyrics lines parsed")
                 return null
             }
             
@@ -132,7 +132,7 @@ object UnifiedLyricsParser {
                 lines = sortedLines
             )
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse lyrics")
+            Timber.f(e, "Failed to parse lyrics")
             null
         }
     }

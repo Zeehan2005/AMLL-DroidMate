@@ -81,7 +81,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
 
             if (!searchResponse.status.isSuccess()) {
-                Timber.w("QQ Music search failed: ${searchResponse.status}")
+                Timber.e("QQ Music search failed: ${searchResponse.status}")
                 return emptyList()
             }
 
@@ -98,7 +98,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonArray
 
             if (songList.isNullOrEmpty()) {
-                Timber.d("No QQ Music results found for: $keyword")
+                Timber.e("No QQ Music results found for: $keyword")
                 return emptyList()
             }
 
@@ -177,7 +177,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
             
             if (!response.status.isSuccess()) {
-                Timber.w("QQ Music lyrics fetch failed: ${response.status}")
+                Timber.e("QQ Music lyrics fetch failed: ${response.status}")
                 return null
             }
             
@@ -208,7 +208,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonPrimitive?.contentOrNull
             
             if (lyricContent.isNullOrBlank() && qrcContent.isNullOrBlank()) {
-                Timber.w("No lyrics content from QQ Music for: $fallbackMid")
+                Timber.e("No lyrics content from QQ Music for: $fallbackMid")
                 return null
             }
             
@@ -223,7 +223,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             
             // 检查内容是否有效（防止"0"或其他无效标记）
             if (contentToUse.length < 5 || contentToUse == "0") {
-                Timber.w("Content from QQ Music is invalid (likely empty): '$contentToUse'")
+                Timber.e("Content from QQ Music is invalid (likely empty): '$contentToUse'")
                 // 检查是否有备选LRC内容
                 if (contentToUse != lyricContent && !lyricContent.isNullOrBlank() && lyricContent.length >= 5 && lyricContent != "0") {
                     Timber.i("Fallback to LRC format from QQ Music")
@@ -297,7 +297,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return mainLyrics.copy(lines = merged)
             
         } catch (e: Exception) {
-            Timber.e(e, "Error fetching QQ Music lyrics")
+            Timber.f(e, "Error fetching QQ Music lyrics")
             null
         }
     }
@@ -371,7 +371,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
 
             mainLyrics.copy(lines = mergeLyricLines(mainLyrics.lines, translationLines, romanizationLines))
         } catch (e: Exception) {
-            Timber.w(e, "QQ lyric_download failed, fallback to PlayLyricInfo")
+            Timber.f(e, "QQ lyric_download failed, fallback to PlayLyricInfo")
             null
         }
     }
@@ -396,7 +396,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchNetease(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
-            Timber.d("Netease search starting for keyword: $keyword")
+            Timber.i("Netease search starting for keyword: $keyword")
 
             val payload = buildJsonObject {
                 put("s", keyword)
@@ -418,7 +418,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
 
             if (!response.status.isSuccess()) {
-                Timber.w("Netease search failed: ${response.status}")
+                Timber.e("Netease search failed: ${response.status}")
                 return emptyList()
             }
 
@@ -536,7 +536,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
             
             if (!response.status.isSuccess()) {
-                Timber.w("Netease lyrics fetch failed: ${response.status}")
+                Timber.e("Netease lyrics fetch failed: ${response.status}")
                 return null
             }
             
@@ -545,7 +545,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             val responseJson = json.parseToJsonElement(responseBody).jsonObject
             val code = responseJson["code"]?.jsonPrimitive?.intOrNull
             if (code != null && code != 200) {
-                Timber.w("Netease lyrics API returned code=$code")
+                Timber.e("Netease lyrics API returned code=$code")
                 return null
             }
             
@@ -590,7 +590,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
 
             if (lyricContent.isNullOrBlank() && yrcContent.isNullOrBlank()) {
-                Timber.w("No lyrics content from Netease for: $songId")
+                Timber.e("No lyrics content from Netease for: $songId")
                 return null
             }
 
@@ -622,7 +622,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return result
             
         } catch (e: Exception) {
-            Timber.e(e, "Error fetching Netease lyrics")
+            Timber.f(e, "Error fetching Netease lyrics")
             null
         }
     }
@@ -633,7 +633,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     suspend fun searchKugou(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
-            Timber.d("Kugou search starting for keyword: $keyword")
+            Timber.i("Kugou search starting for keyword: $keyword")
 
             // Step 1: 从 Kugou 搜歌曲获得哈希值（对齐 Unilyric）
             val searchResponse = httpClient.get("http://mobilecdn.kugou.com/api/v3/search/song") {
@@ -644,7 +644,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
 
             if (!searchResponse.status.isSuccess()) {
-                Timber.w("Kugou song search failed: ${searchResponse.status}")
+                Timber.e("Kugou song search failed: ${searchResponse.status}")
                 return emptyList()
             }
 
@@ -658,7 +658,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             Timber.d("Kugou parsed data element: ${dataElement?.size} items")
 
             if (dataElement.isNullOrEmpty()) {
-                Timber.w("No Kugou song results found for: $keyword")
+                Timber.e("No Kugou song results found for: $keyword")
                 return emptyList()
             }
 
@@ -712,7 +712,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 .take(3)
                 .map { it.first }
         } catch (e: Exception) {
-            Timber.e(e, "Error searching Kugou")
+            Timber.f(e, "Error searching Kugou")
             emptyList()
         }
     }
@@ -735,7 +735,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
             
             if (!searchResponse.status.isSuccess()) {
-                Timber.w("Kugou lyrics search failed: ${searchResponse.status}")
+                Timber.e("Kugou lyrics search failed: ${searchResponse.status}")
                 return null
             }
             
@@ -748,7 +748,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             val candidates = searchJson["candidates"]?.jsonArray
             
             if (status != 200 || candidates.isNullOrEmpty()) {
-                Timber.w("Kugou lyrics search failed with status=$status or no candidates")
+                Timber.e("Kugou lyrics search failed with status=$status or no candidates")
                 return null
             }
             
@@ -787,7 +787,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             val encryptedContent = downloadJson["content"]?.jsonPrimitive?.content
             
             if (encryptedContent.isNullOrBlank()) {
-                Timber.w("No lyrics content in download response")
+                Timber.e("No lyrics content in download response")
                 return null
             }
             
@@ -795,7 +795,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             val decryptedLyrics = KugouDecrypter.decryptKrc(encryptedContent)
             
             if (decryptedLyrics.isNullOrBlank()) {
-                Timber.w("Failed to decrypt Kugou lyrics")
+                Timber.e("Failed to decrypt Kugou lyrics")
                 return null
             }
             
@@ -812,7 +812,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return ttml
             
         } catch (e: Exception) {
-            Timber.e(e, "Error fetching Kugou lyrics")
+            Timber.f(e, "Error fetching Kugou lyrics")
             null
         }
     }
@@ -1237,7 +1237,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             )
             ttml.copy(lines = merged)
         } catch (e: Exception) {
-            Timber.e(e, "Error parsing LRC")
+            Timber.f(e, "Error parsing LRC")
             null
         }
     }
@@ -1264,7 +1264,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             )
             ttml.copy(lines = merged)
         } catch (e: Exception) {
-            Timber.e(e, "Error parsing YRC")
+            Timber.f(e, "Error parsing YRC")
             null
         }
     }
@@ -1445,7 +1445,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             "Lyrics not found on AMLL mirrors for songId=$rawId"
         }
 
-        Timber.e("Error fetching AMLL TTML lyrics: $lastAmlLError")
+        Timber.w("Error fetching AMLL TTML lyrics: $lastAmlLError")
         return null
     }
 
@@ -1491,16 +1491,16 @@ open class LyricsRepository(private val httpClient: HttpClient) {
         }
 
         val amllJob = launch {
-            Timber.d("AMLL search starting...")
+            Timber.i("AMLL search starting...")
             val result = runCatching { searchAMLL(title, artist) }.getOrNull()
-            Timber.d("AMLL search completed: ${if (result != null) "found" else "null"}")
+            Timber.i("AMLL search completed: ${if (result != null) "found" else "null"}")
             tryPublish(result)
         }
 
         val qqMusicJob = launch {
-            Timber.d("QQ Music search starting...")
+            Timber.i("QQ Music search starting...")
             val list = runCatching { searchQQMusic(title, artist) }.getOrNull() ?: emptyList()
-            Timber.d("QQ Music search completed: found ${list.size} items")
+            Timber.i("QQ Music search completed: found ${list.size} items")
             for (r in list) tryPublish(r)
 
             // additionally probe AMLL DB using each QQ id if we found candidates
@@ -1538,16 +1538,16 @@ open class LyricsRepository(private val httpClient: HttpClient) {
         }
 
         val kugouJob = launch {
-            Timber.d("Kugou search starting...")
+            Timber.i("Kugou search starting...")
             val list = runCatching { searchKugou(title, artist) }.getOrNull() ?: emptyList()
-            Timber.d("Kugou search completed: found ${list.size} items")
+            Timber.i("Kugou search completed: found ${list.size} items")
             for (r in list) tryPublish(r)
         }
 
         val neteaseJob = launch {
-            Timber.d("Netease search starting...")
+            Timber.i("Netease search starting...")
             val list = runCatching { searchNetease(title, artist) }.getOrNull() ?: emptyList()
-            Timber.d("Netease search completed: found ${list.size} items")
+            Timber.i("Netease search completed: found ${list.size} items")
             for (r in list) tryPublish(r)
 
             // additionally probe AMLL DB using each Netease id
@@ -1566,10 +1566,10 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     )
                 }
                 if (amllResult != null) {
-                    Timber.d("Netease AMLL probe succeeded, publishing amll result")
+                    Timber.i("Netease AMLL probe succeeded, publishing amll result")
                     tryPublish(amllResult)
                 } else {
-                    Timber.d("Netease AMLL probe returned no data")
+                    Timber.i("Netease AMLL probe returned no data")
                 }
             }
         }
@@ -1622,7 +1622,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             if (localCandidates.isNotEmpty()) {
                 // 按置信度降序遍历，成功则直接返回
                 for (candidate in localCandidates.sortedByDescending { it.confidence }) {
-                    Timber.d("尝试使用本地缓存候选: ${candidate.songId} conf=${candidate.confidence}")
+                    Timber.i("尝试使用本地缓存候选: ${candidate.songId} conf=${candidate.confidence}")
                     val cached = getLyrics(candidate.provider, candidate.songId, candidate.title, candidate.artist)
                     if (cached.isSuccess) {
                         return cached.copy(
@@ -1661,7 +1661,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
             return result
         } catch (e: Exception) {
-            Timber.e(e, "Error in auto-fetch lyrics")
+            Timber.f(e, "Error in auto-fetch lyrics")
             return LyricsResult(
                 isSuccess = false,
                 errorMessage = "获取歌词时发生错误: ${e.message}"
@@ -1688,7 +1688,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 "qq", "qqmusic" -> getQQMusicLyrics(songId, title, artist)
                 "kugou" -> getKugouLyrics(songId, title, artist)
                 else -> {
-                    Timber.w("Unknown provider: $provider")
+                    Timber.e("Unknown provider: $provider")
                     return LyricsResult(
                         isSuccess = false,
                         errorMessage = "不支持的歌词来源: $provider"
@@ -1713,7 +1713,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 )
             }
         } catch (e: Exception) {
-            Timber.e(e, "Error getting lyrics from $provider")
+            Timber.f(e, "Error getting lyrics from $provider")
             LyricsResult(
                 isSuccess = false,
                 errorMessage = "获取歌词出错: ${e.message}"
@@ -1884,7 +1884,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     lines = lines.sortedBy { it.startTime }
                 )
             } catch (e: Exception) {
-                Timber.e(e, "Error parsing TTML")
+                Timber.f(e, "Error parsing TTML")
                 null
             }
         }
@@ -1964,7 +1964,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 
                 (minutes * 60 * 1000) + (seconds * 1000) + millis
             } catch (e: Exception) {
-                Timber.w("Error parsing time: $timeStr")
+                Timber.e("Error parsing time: $timeStr")
                 0L
             }
         }

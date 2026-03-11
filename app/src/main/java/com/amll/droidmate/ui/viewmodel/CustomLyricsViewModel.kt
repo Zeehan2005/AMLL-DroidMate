@@ -175,7 +175,7 @@ class CustomLyricsViewModel @JvmOverloads constructor(
                 }
 
             } catch (e: Exception) {
-                Timber.e(e, "Failed to search candidates")
+                Timber.f(e, "Failed to search candidates")
                 _errorMessage.value = "搜索候选歌词失败: ${e.message}"
             } finally {
                 _isSearching.value = false
@@ -230,7 +230,7 @@ class CustomLyricsViewModel @JvmOverloads constructor(
                     }
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to apply candidate")
+                Timber.f(e, "Failed to apply candidate")
                 _errorMessage.value = "应用候选歌词失败: ${e.message}"
             } finally {
                 _isApplying.value = false
@@ -342,7 +342,7 @@ class CustomLyricsViewModel @JvmOverloads constructor(
                     _errorMessage.value = "无法识别歌词格式"
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to parse manual lyrics")
+                Timber.f(e, "Failed to parse manual lyrics")
                 _errorMessage.value = "解析歌词失败: ${e.message}"
             } finally {
                 _isApplying.value = false

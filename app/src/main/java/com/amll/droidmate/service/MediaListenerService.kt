@@ -13,17 +13,17 @@ class MediaListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Timber.d("MediaListenerService connected")
+        Timber.i("MediaListenerService connected")
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
-        Timber.d("Notification posted from package: ${sbn.packageName}")
+        Timber.i("Notification posted from package: ${sbn.packageName}")
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        Timber.d("MediaListenerService disconnected")
+        Timber.i("MediaListenerService disconnected")
     }
 }

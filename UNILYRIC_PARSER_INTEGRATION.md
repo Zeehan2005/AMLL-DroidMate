@@ -167,11 +167,7 @@ val lyrics = lyricsRepository.parseLRC(
 ## 测试
 
 所有解析器都包含详细的日志输出，可以通过 Timber 查看：
-
-```kotlin
-Timber.d("Detected lyrics format: $format")
-Timber.i("Successfully parsed lyrics with ${lines.size} lines")
-```
+\
 
 ## 向后兼容性
 

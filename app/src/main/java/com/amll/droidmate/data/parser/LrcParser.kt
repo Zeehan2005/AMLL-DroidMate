@@ -32,7 +32,7 @@ object LrcParser {
                 val minutes = ts.groupValues[1].toLongOrNull() ?: continue
                 val seconds = ts.groupValues[2].toLongOrNull() ?: continue
                 if (seconds >= 60) {
-                    Timber.w("Invalid LRC seconds on line ${index + 1}: $line")
+                    Timber.f("Invalid LRC seconds on line ${index + 1}: $line")
                     continue
                 }
                 val fraction = ts.groupValues[3]

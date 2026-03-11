@@ -70,7 +70,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val deleteReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == LyricNotificationManager.ACTION_LYRIC_NOTIFICATION_DISMISSED) {
-                Timber.d("Lyric notification deleted by user, cancelling")
+                Timber.i("Lyric notification deleted by user, cancelling")
                 lyricNotificationManager.cancel()
             }
         }
@@ -97,7 +97,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
     internal fun onNotificationDeletedByUser() {
-        Timber.d("Lyric notification deleted by user (test helper)")
+        Timber.i("Lyric notification deleted by user (test helper)")
         lyricNotificationManager.cancel()
     }
 
@@ -220,13 +220,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val shouldBypassCache = cached.source.contains("kugou", ignoreCase = true) ||
                         cached.source.contains("酷狗")
                     if (shouldBypassCache) {
-                        Timber.i("Bypassing stale Kugou cache to refresh whitespace-fixed lyrics")
+                        Timber.d("Bypassing stale Kugou cache to refresh whitespace-fixed lyrics")
                     } else {
                     val parsed = LyricsRepository.parseTTML(cached.ttmlContent)
                     if (parsed != null) {
                         _lyrics.value = parsed
                         _errorMessage.value = null
-                        Timber.i("Loaded lyrics from cache: ${cached.title} - ${cached.artist} (${cached.source})")
+                        Timber.d("Loaded lyrics from cache: ${cached.title} - ${cached.artist} (${cached.source})")
                         return@launch
                     }
                     }
@@ -251,11 +251,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Timber.i("Successfully fetched lyrics from ${result.source}")
                 } else {
                     _errorMessage.value = result.errorMessage ?: "获取歌词失败"
-                    Timber.w("Failed to fetch lyrics: ${result.errorMessage}")
+                    Timber.f("Failed to fetch lyrics: ${result.errorMessage}")
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "错误: ${e.message}"
-                Timber.e(e, "Error fetching lyrics")
+                Timber.f(e, "Error fetching lyrics")
             } finally {
                 _isLoading.value = false
             }
@@ -275,13 +275,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 if (ttml != null) {
                     _lyrics.value = ttml
-                    Timber.d("Successfully converted LRC to TTML")
+                    Timber.i("Successfully converted LRC to TTML")
                 } else {
                     _errorMessage.value = "LRC 转换失败"
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "转换错误: ${e.message}"
-                Timber.e(e, "Error converting LRC to TTML")
+                Timber.f(e, "Error converting LRC to TTML")
             }
         }
     }
@@ -318,7 +318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "应用歌词失败: ${e.message}"
-                Timber.e(e, "Error applying custom lyrics input")
+                Timber.f(e, "Error applying custom lyrics input")
             }
         }
     }
@@ -358,7 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun seekTo(position: Long) {
-        Timber.i("MainViewModel.seekTo(position=$position)")
+        Timber.d("MainViewModel.seekTo(position=$position)")
         mediaInfoService.seekTo(position)
     }
     

@@ -254,7 +254,7 @@ fun MainScreen() {
     }
 
     LaunchedEffect(webViewReloadKey) {
-        Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] webViewReloadKey changed -> $webViewReloadKey")
+        Timber.tag(MAIN_SCREEN_LOG_TAG).d("[reload] webViewReloadKey changed -> $webViewReloadKey")
     }
 
     Box(
@@ -311,11 +311,11 @@ fun MainScreen() {
                                 },
                                 text = { Text("刷新") },
                                 onClick = {
-                                    Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
+                                    Timber.tag(MAIN_SCREEN_LOG_TAG).d("[reload] Refresh menu clicked, oldKey=$webViewReloadKey")
                                     webViewReloadKey += 1
                                     // 额外从缓存再读一次歌词，防止歌曲切换过快导致 WebView 内歌词停留旧数据
                                     viewModel.fetchLyrics()
-                                    Timber.tag(MAIN_SCREEN_LOG_TAG).i("[reload] Refresh handled, newKey=$webViewReloadKey")
+                                    Timber.tag(MAIN_SCREEN_LOG_TAG).d("[reload] Refresh handled, newKey=$webViewReloadKey")
                                     showMenu = false
                                 }
                             )
@@ -477,7 +477,7 @@ fun MainScreen() {
                             currentTime = currentTime,
                             webViewReloadKey = webViewReloadKey,
                             onLineSeek = { seekTime ->
-                                Timber.tag(MAIN_SCREEN_LOG_TAG).i("[embedded] onLineSeek($seekTime)")
+                                Timber.tag(MAIN_SCREEN_LOG_TAG).d("[embedded] onLineSeek($seekTime)")
                                 viewModel.seekTo(seekTime)
                             },
                             onFullscreenTap = { isLyricsFullscreen = true },
@@ -779,7 +779,7 @@ fun MainScreen() {
                         currentTime = currentTime,
                         webViewReloadKey = webViewReloadKey,
                         onLineSeek = { seekTime ->
-                            Timber.tag(MAIN_SCREEN_LOG_TAG).i("[fullscreen] onLineSeek($seekTime)")
+                            Timber.tag(MAIN_SCREEN_LOG_TAG).d("[fullscreen] onLineSeek($seekTime)")
                             viewModel.seekTo(seekTime)
                             resetHideTimer()
                         },
@@ -1062,7 +1062,7 @@ private fun LyricsVisualLayer(
     modifier: Modifier = Modifier
 ) {
     LaunchedEffect(webViewReloadKey, amllDebugSource) {
-        Timber.tag(MAIN_SCREEN_LOG_TAG).i("[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
+        Timber.tag(MAIN_SCREEN_LOG_TAG).d("[$amllDebugSource] LyricsVisualLayer reload signal key=$webViewReloadKey")
     }
 
     Box(

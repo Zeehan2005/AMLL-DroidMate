@@ -22,7 +22,7 @@ object TTMLParser {
             val doc = builder.parse(content.byteInputStream())
             parseTTMLDocument(doc)
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse TTML content")
+            Timber.f(e, "Failed to parse TTML content")
             emptyList()
         }
     }
@@ -57,14 +57,14 @@ object TTMLParser {
                 parseParagraph(pElement)?.let { parsedParagraphs.add(it) }
             }
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse TTML document structure")
+            Timber.f(e, "Failed to parse TTML document structure")
             return emptyList()
         }
 
         val normalizedAgents = parsedParagraphs.map { normalizeAgent(it.agent) }
         val uniqueAgents = normalizedAgents.filterNotNull().distinct()
         
-        Timber.d("[AGENT-DEBUG] Total lines: ${parsedParagraphs.size}, unique agents: ${uniqueAgents.size}, agents: $uniqueAgents")
+        Timber.i("[AGENT] Total lines: ${parsedParagraphs.size}, unique agents: ${uniqueAgents.size}, agents: $uniqueAgents")
         
         val duetFlags = when {
             uniqueAgents.size <= 1 -> {
@@ -175,7 +175,7 @@ object TTMLParser {
                 ParsedParagraph(mainLine = mainLine, bgLine = bgLine, agent = agent)
             }
         } catch (e: Exception) {
-            Timber.w(e, "Failed to parse paragraph")
+            Timber.e(e, "Failed to parse paragraph")
             null
         }
     }
@@ -530,7 +530,7 @@ object TTMLParser {
 
             (hours * 3600 + minutes * 60 + seconds) * 1000 + millis
         } catch (e: Exception) {
-            Timber.w(e, "Failed to parse time string: $timeStr")
+            Timber.f(e, "Failed to parse time string: $timeStr")
             0L
         }
     }
