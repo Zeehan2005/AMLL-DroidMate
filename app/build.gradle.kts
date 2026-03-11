@@ -119,11 +119,6 @@ dependencies {
     // Ktor mock engine for unit testing HTTP interactions
     testImplementation("io.ktor:ktor-client-mock:2.3.6")
     testImplementation("io.ktor:ktor-client-mock-jvm:2.3.6")
-    // also need mock engine on instrumented tests for MainViewModelTest
-    androidTestImplementation("io.ktor:ktor-client-mock:2.3.6")
-    androidTestImplementation("io.ktor:ktor-client-mock-jvm:2.3.6")
-    // coroutines test for androidTest as well
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
