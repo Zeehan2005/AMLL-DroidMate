@@ -16,6 +16,9 @@ import io.ktor.http.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
@@ -26,10 +29,13 @@ import timber.log.Timber
  * 歌词仓库 - 从多个来源获取和管理歌词
  * 基于 Unilyric 的多源搜索逻辑实现
  */
+@OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
 open class LyricsRepository(
     private val httpClient: HttpClient,
     private val cacheRepo: LyricsCacheRepository? = null
 ) {
+    // scope used for background AMLL probes; keeps them independent of caller
+    private val amllProbeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // exposed for testing
     internal enum class MatchType(val score: Int) {
@@ -479,36 +485,7 @@ open class LyricsRepository(
         }
     }
 
-    /**
-     * AMLL 轻量搜索：尝试通过已知音乐服务的 ID 查找数据库，以避免本地索引匹配造成卡顿。
-     *
-     * 当仅给定网易云候选时会默认使用 ncm 平台（这是最常见的情况），
-     * 但是后台也会在获得 QQ 结果后额外向 `qq` 平台发起探测；
-     * 将来若需要可扩展至 spotify、am 等其他平台。
-     */
-    suspend fun searchAMLL(title: String, artist: String): LyricsSearchResult? {
-        return try {
-            val neteaseCandidate = searchNetease(title, artist).firstOrNull() ?: return null
-            // prefix with platform so that callers later know which path to hit
-            val amllId = "ncm:${neteaseCandidate.songId}"
-            val amllLyrics = getAMLL_TTMLLyrics(
-                amllId,
-                title = neteaseCandidate.title,
-                artist = neteaseCandidate.artist
-            ) ?: return null
-            neteaseCandidate.copy(
-                provider = "amll",
-                songId = amllId,
-                title = amllLyrics.metadata.title.takeIf { it.isNotBlank() } ?: neteaseCandidate.title,
-                artist = amllLyrics.metadata.artist.takeIf { it.isNotBlank() } ?: neteaseCandidate.artist,
-                album = amllLyrics.metadata.album ?: neteaseCandidate.album
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Error searching AMLL")
-            null
-        }
-    }
-    
+
     /**
      * 从网易云音乐获取歌词内容
      */
@@ -1032,7 +1009,7 @@ open class LyricsRepository(
             "orchestral", "demo", "remaster", "ringtone", "slowed", "sped up", "slow", "fast",
             "tiktok", 
             // Chinese equivalents / additional keywords
-            "混音", "现场", "演唱会", "晚会", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
+            "混音", "现场", "演唱会", "晚会", "伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
             "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作", "片段",
             "铃声", "慢速", "快速", "加速", "减速", "抖音"
         )
@@ -1495,33 +1472,46 @@ open class LyricsRepository(
 
             totalEndpoints += endpoints.size
 
-            for (url in endpoints) {
-                try {
-                    val response = httpClient.get(url)
-                    if (!response.status.isSuccess()) {
-                        Timber.w("AMLL endpoint non-success status ${response.status.value}: $url")
-                        continue
+            // concurrently query all endpoints and take first successful parse
+            val channel = kotlinx.coroutines.channels.Channel<Pair<String, TTMLLyrics>>(capacity = 1)
+            val jobs = endpoints.map { url ->
+                amllProbeScope.launch {
+                    try {
+                        val response = httpClient.get(url)
+                        if (!response.status.isSuccess()) {
+                            Timber.w("AMLL endpoint non-success status ${response.status.value}: $url")
+                        } else {
+                            val content = response.body<String>()
+                            if (content.contains("<tt", ignoreCase = true)) {
+                                val parsed = parseTTML(content, title, artist)
+                                if (parsed != null && parsed.lines.isNotEmpty()) {
+                                    channel.trySend(url to parsed)
+                                } else {
+                                    Timber.w("TTML parse yielded empty result: $url")
+                                }
+                            } else {
+                                Timber.w("AMLL endpoint returned non-TTML payload: $url")
+                            }
+                        }
+                    } catch (e: UnknownHostException) {
+                        unknownHostCount += 1
+                        Timber.w(e, "AMLL host unresolved: $url")
+                    } catch (e: Exception) {
+                        Timber.w(e, "AMLL endpoint failed: $url")
                     }
-
-                    val content = response.body<String>()
-                    if (!content.contains("<tt", ignoreCase = true)) {
-                        Timber.w("AMLL endpoint returned non-TTML payload: $url")
-                        continue
-                    }
-
-                    val parsed = parseTTML(content, title, artist)
-                    if (parsed != null && parsed.lines.isNotEmpty()) {
-                        Timber.i("Fetched AMLL lyrics from: $url")
-                        lastAmlLError = null
-                        return parsed
-                    }
-                    Timber.w("TTML parse yielded empty result: $url")
-                } catch (e: UnknownHostException) {
-                    unknownHostCount += 1
-                    Timber.w(e, "AMLL host unresolved: $url")
-                } catch (e: Exception) {
-                    Timber.w(e, "AMLL endpoint failed: $url")
                 }
+            }
+
+            // wait for first successful lyrics or for all jobs to finish
+            val pair = channel.receiveCatching().getOrNull()
+            jobs.forEach { job -> job.cancel() }
+            channel.close()
+
+            if (pair != null) {
+                val (url, parsed) = pair
+                Timber.i("Fetched AMLL lyrics from: $url")
+                lastAmlLError = null
+                return parsed
             }
         }
 
@@ -1576,32 +1566,41 @@ open class LyricsRepository(
             }
         }
 
-        val amllJob = launch {
-            Timber.i("AMLL search starting...")
-            val result = runCatching { searchAMLL(title, artist) }.getOrNull()
-            Timber.i("AMLL search completed: ${if (result != null) "found" else "null"}")
-            tryPublish(result)
-        }
-
         val qqMusicJob = launch {
             Timber.i("QQ Music search starting...")
             val list = runCatching { searchQQMusic(title, artist) }.getOrNull() ?: emptyList()
             Timber.i("QQ Music search completed: found ${list.size} items")
             for (r in list) tryPublish(r)
 
-            // additionally probe AMLL DB using each QQ id if we found candidates
-            for (result in list) {
-                val rawId = result.songId
-                val segments = rawId.split("::")
-                var published = false
-                for (seg in segments) {
-                    if (seg.isBlank()) continue
-                    val prefixId = "qq:$seg"
-                    Timber.d("Probing AMLL DB for QQ candidate segment: $prefixId (raw=$rawId)")
-                    val amllResult = runCatching {
-                        getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
-                    }.getOrNull()
-                    if (amllResult != null) {
+            // concurrently probe AMLL DB for all QQ candidates/segments
+            // fire-and-forget model: use GlobalScope so parent job ends immediately
+            list.forEach { result ->
+                amllProbeScope.launch outer@{
+                    val rawId = result.songId
+                    val segments = rawId.split("::").filter { it.isNotBlank() }
+                    if (segments.isEmpty()) {
+                        Timber.d("QQ AMLL probe: no segments for rawId=$rawId")
+                        return@outer
+                    }
+
+                    val channel = kotlinx.coroutines.channels.Channel<Pair<String, TTMLLyrics>>(capacity = 1)
+                    val jobs = segments.map { seg ->
+                        amllProbeScope.launch {
+                            val prefixId = "qq:$seg"
+                            Timber.d("Probing AMLL DB for QQ candidate segment: $prefixId (raw=$rawId)")
+                            val amllResult = runCatching {
+                                getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
+                            }.getOrNull()
+                            if (amllResult != null) {
+                                channel.trySend(prefixId to amllResult)
+                            }
+                        }
+                    }
+
+                    // await first success if any (within this detached job)
+                    val pair = channel.receiveCatching().getOrNull()
+                    if (pair != null) {
+                        val (prefixId, amllResult) = pair
                         val wrapped = result.copy(
                             provider = "amll",
                             songId = prefixId,
@@ -1609,16 +1608,14 @@ open class LyricsRepository(
                             artist = amllResult.metadata.artist.takeIf { it.isNotBlank() } ?: result.artist,
                             album = amllResult.metadata.album ?: result.album
                         )
-                        Timber.d("QQ AMLL probe succeeded with segment '$seg', publishing amll result")
+                        Timber.d("QQ AMLL probe succeeded with segment '$prefixId', publishing amll result")
                         tryPublish(wrapped)
-                        published = true
-                        break // stop after first successful match
                     } else {
-                        Timber.d("QQ AMLL probe for segment '$seg' returned no data")
+                        Timber.d("QQ AMLL probe found no matching segments for rawId=$rawId")
                     }
-                }
-                if (!published) {
-                    Timber.d("QQ AMLL probe found no matching segments for rawId=$rawId")
+
+                    jobs.forEach { job -> job.cancel() }
+                    channel.close()
                 }
             }
         }
@@ -1636,31 +1633,32 @@ open class LyricsRepository(
             Timber.i("Netease search completed: found ${list.size} items")
             for (r in list) tryPublish(r)
 
-            // additionally probe AMLL DB using each Netease id
-            for (result in list) {
-                val prefixId = "ncm:${result.songId}"
-                Timber.d("Probing AMLL DB for Netease candidate: $prefixId")
-                val amllResult = runCatching {
-                    getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
-                }.getOrNull()?.let { lyrics ->
-                    result.copy(
-                        provider = "amll",
-                        songId = prefixId,
-                        title = lyrics.metadata.title.takeIf { it.isNotBlank() } ?: result.title,
-                        artist = lyrics.metadata.artist.takeIf { it.isNotBlank() } ?: result.artist,
-                        album = lyrics.metadata.album ?: result.album
-                    )
-                }
-                if (amllResult != null) {
-                    Timber.i("Netease AMLL probe succeeded, publishing amll result")
-                    tryPublish(amllResult)
-                } else {
-                    Timber.i("Netease AMLL probe returned no data")
+            // probe AMLL DB concurrently for each Netease candidate without waiting
+            list.forEach { result ->
+                amllProbeScope.launch outerNetease@{
+                    val prefixId = "ncm:${result.songId}"
+                    Timber.d("Probing AMLL DB for Netease candidate: $prefixId")
+                    val amllResult = runCatching {
+                        getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
+                    }.getOrNull()?.let { lyrics ->
+                        result.copy(
+                            provider = "amll",
+                            songId = prefixId,
+                            title = lyrics.metadata.title.takeIf { it.isNotBlank() } ?: result.title,
+                            artist = lyrics.metadata.artist.takeIf { it.isNotBlank() } ?: result.artist,
+                            album = lyrics.metadata.album ?: result.album
+                        )
+                    }
+                    if (amllResult != null) {
+                        Timber.i("Netease AMLL probe succeeded, publishing amll result")
+                        tryPublish(amllResult)
+                    } else {
+                        Timber.i("Netease AMLL probe returned no data")
+                    }
                 }
             }
         }
 
-        amllJob.join()
         qqMusicJob.join()
         kugouJob.join()
         neteaseJob.join()

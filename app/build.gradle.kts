@@ -119,8 +119,6 @@ dependencies {
     // Ktor mock engine for unit testing HTTP interactions
     testImplementation("io.ktor:ktor-client-mock:2.3.6")
     testImplementation("io.ktor:ktor-client-mock-jvm:2.3.6")
-    // provide the same mock artifacts for instrumentation tests so androidTest code can import MockEngine/\n    androidTestImplementation("io.ktor:ktor-client-mock:2.3.6")
-    androidTestImplementation("io.ktor:ktor-client-mock-jvm:2.3.6")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

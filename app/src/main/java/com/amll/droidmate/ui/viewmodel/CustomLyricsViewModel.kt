@@ -30,7 +30,12 @@ data class CustomLyricsCandidate(
      * 特性集合, e.g. 对唱/背景/重叠/翻译/音译/逐字
      * UI 需要在候选列表中显示这些功能。
      */
-    val features: Set<com.amll.droidmate.domain.model.LyricsFeature> = emptySet()
+    val features: Set<com.amll.droidmate.domain.model.LyricsFeature> = emptySet(),
+    /**
+     * Monotonic sequence assigned when candidate is first published.
+     * Higher value means the candidate arrived later; used to break ties.
+     */
+    val seq: Long = 0L
 )
 
 class CustomLyricsViewModel @JvmOverloads constructor(
@@ -80,13 +85,24 @@ class CustomLyricsViewModel @JvmOverloads constructor(
         // 1. cache
         val aCache = a.provider.equals("cache", true)
         val bCache = b.provider.equals("cache", true)
-        if (aCache != bCache) return if (aCache) -1 else 1
+        if (aCache != bCache) {
+            val res = if (aCache) -1 else 1
+            Timber.d("compareCandidates cache: $a vs $b -> $res")
+            return res
+        }
 
         // 2. confidence + features
         val confDiff = a.confidence - b.confidence
-        if (confDiff != 0f) return -confDiff.compareTo(0f)
+        if (confDiff != 0f) {
+            val res = -confDiff.compareTo(0f)
+            Timber.d("compareCandidates confidence: $a vs $b -> $res (diff=$confDiff)")
+            return res
+        }
         val featDiff = b.features.size - a.features.size
-        if (featDiff != 0) return featDiff
+        if (featDiff != 0) {
+            Timber.d("compareCandidates features: $a vs $b -> $featDiff")
+            return featDiff
+        }
 
         // 3. current source bias
         currentSourceName?.let { source ->
@@ -100,7 +116,11 @@ class CustomLyricsViewModel @JvmOverloads constructor(
             if (priorityList.isNotEmpty()) {
                 val ai = priorityList.indexOf(a.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
                 val bi = priorityList.indexOf(b.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
-                if (ai != bi) return ai - bi
+                if (ai != bi) {
+                    val res = ai - bi
+                    Timber.d("compareCandidates source bias: $a vs $b -> $res")
+                    return res
+                }
             }
 
             // 3b. if one of the candidates is from AMLL DB and its songId has a
@@ -119,7 +139,11 @@ class CustomLyricsViewModel @JvmOverloads constructor(
             }
             val aMatch = amllMatches(a)
             val bMatch = amllMatches(b)
-            if (aMatch != bMatch) return if (aMatch) -1 else 1
+            if (aMatch != bMatch) {
+                val res = if (aMatch) -1 else 1
+                Timber.d("compareCandidates amll prefix: $a vs $b -> $res")
+                return res
+            }
         }
 
         // 4. fixed provider priority
@@ -131,20 +155,42 @@ class CustomLyricsViewModel @JvmOverloads constructor(
             val preferKugou = lowerSource.contains("酷狗") && !lowerSource.contains("qq")
             val preferQQ = lowerSource.contains("qq") && !lowerSource.contains("酷狗")
             if (preferKugou) {
-                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") return -1
-                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") return 1
+                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") {
+                    Timber.d("compareCandidates tme pref kugou: $a vs $b -> -1")
+                    return -1
+                }
+                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") {
+                    Timber.d("compareCandidates tme pref kugou: $a vs $b -> 1")
+                    return 1
+                }
             } else if (preferQQ) {
-                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") return -1
-                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") return 1
+                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") {
+                    Timber.d("compareCandidates tme pref qq: $a vs $b -> -1")
+                    return -1
+                }
+                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") {
+                    Timber.d("compareCandidates tme pref qq: $a vs $b -> 1")
+                    return 1
+                }
             }
             // else equal order
         } else {
             val pa = providerPriority[a.provider.lowercase()] ?: Int.MAX_VALUE
             val pb = providerPriority[b.provider.lowercase()] ?: Int.MAX_VALUE
-            if (pa != pb) return pa - pb
+            if (pa != pb) {
+                val res = pa - pb
+                Timber.d("compareCandidates provider priority: $a vs $b -> $res")
+                return res
+            }
         }
 
-        // 5. equal -> preserve insertion order
+        // 5. equal -> break tie with seq, earlier arrivals first
+        if (a.seq != b.seq) {
+            val res = a.seq.compareTo(b.seq)
+            Timber.d("compareCandidates seq tie-break asc: $a(seq=${a.seq}) vs $b(seq=${b.seq}) -> $res")
+            return res
+        }
+        Timber.d("compareCandidates tie: $a vs $b -> 0 (preserve order)")
         return 0
     }
 
@@ -159,9 +205,13 @@ class CustomLyricsViewModel @JvmOverloads constructor(
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates
 
+    // sequence generator for arrival order
+    private val seqGenerator = java.util.concurrent.atomic.AtomicLong()
+
     // helper used by searchCandidates and loadMore
     private suspend fun publishCandidate(candidate: CustomLyricsCandidate) {
-        _candidates.value = (_candidates.value + candidate)
+        val withSeq = candidate.copy(seq = seqGenerator.incrementAndGet())
+        _candidates.value = (_candidates.value + withSeq)
             .sortedWith(combinedComparator)
     }
 
@@ -432,7 +482,8 @@ class CustomLyricsViewModel @JvmOverloads constructor(
             val exists = _candidates.value.any { "${it.provider.lowercase()}:${it.songId}" == key }
             if (exists) return
 
-            _candidates.value = (_candidates.value + candidate)
+            val withSeq = candidate.copy(seq = seqGenerator.incrementAndGet())
+            _candidates.value = (_candidates.value + withSeq)
                 .sortedWith(candidateComparator)
         }
 

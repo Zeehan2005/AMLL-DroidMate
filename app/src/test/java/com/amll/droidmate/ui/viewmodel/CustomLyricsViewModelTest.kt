@@ -177,6 +177,16 @@ class CustomLyricsViewModelTest {
     }
 
     @Test
+    fun `earlier seq candidate wins when fully tied`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        // assign sequence numbers explicitly
+        val a = CustomLyricsCandidate("qq", "1", "T", "A", 0.5f, "", "", emptySet(), seq = 1L)
+        val b = CustomLyricsCandidate("qq", "2", "T", "A", 0.5f, "", "", emptySet(), seq = 2L)
+        val sorted = listOf(a, b).sortedWith(vm.candidateComparator)
+        assertEquals(a, sorted.first())
+    }
+
+    @Test
     fun `loadMore adds next batch of QQ results`() = runTest {
         // engine returns 5 QQ items whenever QQ endpoint is called, empty for others
         val qqItems = (1..5).joinToString(",") { i ->

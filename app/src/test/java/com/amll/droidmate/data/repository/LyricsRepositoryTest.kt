@@ -129,8 +129,8 @@ class LyricsRepositoryTest {
         val requested = mutableListOf<String>()
         val engine = MockEngine { request ->
             requested += request.url.toString()
-            // first URL -> 404, second -> success
-            if (requested.size == 1) {
+            // fail any AAA urls, succeed on others (BBB)
+            if (request.url.toString().contains("/qq/AAA")) {
                 respond("not found", HttpStatusCode.NotFound)
             } else {
                 val ttml = """<?xml version=\"1.0\"?><tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:00.000\" end=\"00:00.500\">hi</p></div></body></tt>"""
@@ -174,8 +174,8 @@ class LyricsRepositoryTest {
         val requested = mutableListOf<String>()
         val engine = MockEngine { request ->
             requested += request.url.toString()
-            // simulate a hit on second candidate
-            if (requested.size == 1) {
+            // fail any url containing the first segment value
+            if (request.url.toString().contains("/qq/dhi8dhagd")) {
                 respond("not found", HttpStatusCode.NotFound)
             } else {
                 val ttml = """<?xml version=\"1.0\"?><tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:00.000\" end=\"00:00.500\">hi</p></div></body></tt>"""
