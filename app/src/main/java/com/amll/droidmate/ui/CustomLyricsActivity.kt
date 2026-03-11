@@ -64,6 +64,7 @@ class CustomLyricsActivity : ComponentActivity() {
 
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val artist = intent.getStringExtra(EXTRA_ARTIST).orEmpty()
+        val playbackSource = intent.getStringExtra(EXTRA_PLAYBACK_SOURCE)
 
         // 我们不再在 Activity 里阻止搜索，即使有缓存也继续显示候选
         // （缓存优先逻辑由 ViewModel 处理）
@@ -81,6 +82,10 @@ class CustomLyricsActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val viewModel: CustomLyricsViewModel = viewModel()
+                    // tell VM about playback app so ranking rules can use it
+                    LaunchedEffect(playbackSource) {
+                        viewModel.updateCurrentSource(playbackSource)
+                    }
                     val appliedSource by viewModel.appliedLyricsSource.collectAsState()
 
                     CustomLyricsPage(
@@ -108,6 +113,7 @@ class CustomLyricsActivity : ComponentActivity() {
         const val EXTRA_ARTIST = "extra_artist"
         const val EXTRA_LYRICS_TEXT = "extra_lyrics_text"
         const val EXTRA_SOURCE = "extra_lyrics_source"
+        const val EXTRA_PLAYBACK_SOURCE = "extra_playback_source"
     }
 }
 

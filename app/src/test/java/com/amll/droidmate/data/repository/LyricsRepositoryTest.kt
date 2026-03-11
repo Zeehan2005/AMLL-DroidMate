@@ -293,6 +293,40 @@ class LyricsRepositoryTest {
     }
 
     @Test
+    fun `adjustResultsForFeatures falls back to provider priority after ties`() = runTest {
+        val repo = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
+        val amll = LyricsSearchResult(provider = "amll", songId = "1", title = "t", artist = "a", confidence = 0.9f)
+        val qq = LyricsSearchResult(provider = "qq", songId = "2", title = "t", artist = "a", confidence = 0.9f)
+        // same confidence, same (empty) features, no currentSourceName
+        val ordered = repo.adjustResultsForFeatures(listOf(qq, amll), currentSourceName = null)
+        // amll has higher priority than qq according to map
+        assertEquals(amll, ordered.first())
+    }
+
+    @Test
+    fun `adjustResultsForFeatures prefers amll id matching current source`() = runTest {
+        val repo = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
+        val amllA = LyricsSearchResult(provider = "amll", songId = "qq:xxx", title = "t", artist = "a", confidence = 0.8f)
+        val amllB = LyricsSearchResult(provider = "amll", songId = "netease:yyy", title = "t", artist = "a", confidence = 0.8f)
+        val ordered = repo.adjustResultsForFeatures(listOf(amllB, amllA), currentSourceName = "QQ Music")
+        assertEquals(amllA, ordered.first())
+    }
+
+    @Test
+    fun `adjustResultsForFeatures directional qq and kugou preference under tme`() = runTest {
+        val repo = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
+        val qq = LyricsSearchResult(provider = "qq", songId = "1", title = "t", artist = "a", confidence = 0.7f)
+        val kugou = LyricsSearchResult(provider = "kugou", songId = "2", title = "t", artist = "a", confidence = 0.7f)
+
+        val ord1 = repo.adjustResultsForFeatures(listOf(kugou, qq), currentSourceName = "QQ Music")
+        assertEquals(listOf(qq, kugou), ord1)
+        val ord2 = repo.adjustResultsForFeatures(listOf(qq, kugou), currentSourceName = "酷狗播放器")
+        assertEquals(listOf(kugou, qq), ord2)
+        val ord3 = repo.adjustResultsForFeatures(listOf(kugou, qq), currentSourceName = "QQ & 酷狗")
+        assertEquals(listOf(qq, kugou), ord3)
+    }
+
+    @Test
     fun `fetchLyricsAuto picks highest-confidence candidate first`() = runTest {
         val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
             // this engine should never actually be used in our overrides
@@ -330,7 +364,7 @@ class LyricsRepositoryTest {
         val result = fake.fetchLyricsAuto("t", "a", currentSourceName = null)
         assertTrue(result.isSuccess)
         // candidate 1 should be chosen because it has higher confidence
-        assertTrue(result.source?.contains("(1)") == true)
+        assertTrue(result.source?.contains("(1)") ?: false)
     }
 
     @Test
@@ -359,7 +393,7 @@ class LyricsRepositoryTest {
         val res = fake.fetchLyricsAuto("t", "a")
         assertTrue(res.isSuccess)
         assertEquals("local", res.source)
-        assertFalse(searched, "searchLyrics should not be called when cache exists")
+        assertFalse("searchLyrics should not be called when cache exists", searched)
     }
 
     @Test

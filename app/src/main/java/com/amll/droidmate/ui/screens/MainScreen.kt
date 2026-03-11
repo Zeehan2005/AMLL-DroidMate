@@ -300,6 +300,14 @@ fun MainScreen() {
                                     val intent = Intent(context, CustomLyricsActivity::class.java).apply {
                                         putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
                                         putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                        putExtra(
+                                            CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE,
+                                            getAppNameFromPackage(context, nowPlaying?.packageName)
+                                        )
+                                        putExtra(
+                                            CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE,
+                                            getAppNameFromPackage(context, nowPlaying?.packageName)
+                                        )
                                     }
                                     customLyricsLauncher.launch(intent)
                                     showMenu = false
@@ -644,6 +652,14 @@ fun MainScreen() {
                             val intent = Intent(context, CustomLyricsActivity::class.java).apply {
                                 putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
                                 putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                putExtra(
+                                    CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE,
+                                    getAppNameFromPackage(context, nowPlaying?.packageName)
+                                )
+                                putExtra(
+                                    CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE,
+                                    getAppNameFromPackage(context, nowPlaying?.packageName)
+                                )
                             }
                             customLyricsLauncher.launch(intent)
                         },

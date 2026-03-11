@@ -146,7 +146,7 @@ open class LyricsRepository(
     /**
      * 从 QQ 音乐获取歌词内容
      */
-    suspend fun getQQMusicLyrics(songMid: String, title: String? = null, artist: String? = null): TTMLLyrics? {
+    open suspend fun getQQMusicLyrics(songMid: String, title: String? = null, artist: String? = null): TTMLLyrics? {
         return try {
             val (mid, numericId) = parseQqSongIds(songMid)
 
@@ -512,7 +512,7 @@ open class LyricsRepository(
     /**
      * 从网易云音乐获取歌词内容
      */
-    suspend fun getNeteaseLyrics(songId: String, title: String? = null, artist: String? = null): TTMLLyrics? {
+    open suspend fun getNeteaseLyrics(songId: String, title: String? = null, artist: String? = null): TTMLLyrics? {
         return try {
             val payload = buildJsonObject {
                 put("id", songId)
@@ -723,7 +723,7 @@ open class LyricsRepository(
     /**
      * 从酷狗音乐获取歌词内容
      */
-    suspend fun getKugouLyrics(hash: String, title: String? = null, artist: String? = null): TTMLLyrics? {
+    open suspend fun getKugouLyrics(hash: String, title: String? = null, artist: String? = null): TTMLLyrics? {
         return try {
             // 基于 Unilyric 的实现
             // https://lyrics.kugou.com 是官方歌词 API
@@ -950,18 +950,23 @@ open class LyricsRepository(
     private fun extractVersionKeywords(s: String): Set<String> {
         val keywords = listOf(
             // English terms
-            "remix", "live", "dj", "edit", "mix", "acoustic",
+            "remix", "live", "concert","dj", "edit", "mix", "acoustic",
             "instrumental", "extended", "karaoke", "remastered", "rework",
             "re-edit", "unplugged", "piano", "strings",
             "orchestral", "demo", "remaster",
             // Chinese equivalents / additional keywords
-            "混音", "现场", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
-            "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作"
+            "混音", "现场", "演唱会", "晚会", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
+            "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作", "片段"
         )
         val lower = s.lowercase()
 
         // start with any keyword that appears in the string
         val matches = keywords.filter { lower.contains(it) }.toMutableSet()
+
+        // additionally detect numeric tempo/multiplier markers like "0.6x", "1.5x" etc.
+        // such tokens are commonly used to denote speed changes and should count as version keywords.
+        val multiplierRegex = Regex("\\b\\d+(?:\\.\\d+)?x\\b")
+        multiplierRegex.findAll(lower).forEach { matches.add(it.value) }
 
         // extra: capture parenthesized segments that likely indicate a version
         // marker, e.g. "(国语版)" or "(remix version)".  we only consider cases
@@ -1799,33 +1804,80 @@ open class LyricsRepository(
             result to features
         }
         return decorated.sortedWith(Comparator { a, b ->
+            // 2. confidence
             val diff = a.first.confidence - b.first.confidence
-            if (diff != 0f) {
-                -diff.compareTo(0f)
-            } else {
-                // confidences tie
-                val featureDiff = b.second.size - a.second.size
-                if (featureDiff != 0) {
-                    featureDiff
-                } else if (!currentSourceName.isNullOrBlank()) {
-                    val lower = currentSourceName.lowercase()
-                    val priorityList = when {
-                        lower.contains("网易") -> listOf("netease")
-                        lower.contains("qq") -> listOf("qq", "kugou")
-                        lower.contains("酷狗") -> listOf("kugou", "qq")
-                        else -> emptyList()
-                    }
-                    if (priorityList.isNotEmpty()) {
-                        val aIndex = priorityList.indexOf(a.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
-                        val bIndex = priorityList.indexOf(b.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
-                        aIndex.compareTo(bIndex)
-                    } else {
-                        0
-                    }
-                } else {
-                    0
+            if (diff != 0f) return@Comparator -diff.compareTo(0f)
+
+            // 3. features
+            val featureDiff = b.second.size - a.second.size
+            if (featureDiff != 0) return@Comparator featureDiff
+
+            // 4. current source bias
+            if (!currentSourceName.isNullOrBlank()) {
+                val lower = currentSourceName.lowercase()
+                val priorityList = when {
+                    lower.contains("网易") -> listOf("netease")
+                    lower.contains("qq") -> listOf("qq", "kugou")
+                    lower.contains("酷狗") -> listOf("kugou", "qq")
+                    else -> emptyList()
                 }
+                if (priorityList.isNotEmpty()) {
+                    val aIndex = priorityList.indexOf(a.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                    val bIndex = priorityList.indexOf(b.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                    if (aIndex != bIndex) return@Comparator aIndex.compareTo(bIndex)
+                }
+
+                // 4b. AMLL prefix check
+                fun amllMatch(r: LyricsSearchResult): Boolean {
+                    if (!r.provider.equals("amll", true)) return false
+                    val parts = r.songId.split(":", limit = 2)
+                    if (parts.size < 2) return false
+                    val prefix = parts[0].lowercase()
+                    return when {
+                        lower.contains("网易") -> prefix == "netease" || prefix == "ncm"
+                        lower.contains("qq") -> prefix == "qq" || prefix == "qqmusic"
+                        lower.contains("酷狗") -> prefix == "kugou"
+                        else -> false
+                    }
+                }
+                val aMatch = amllMatch(a.first)
+                val bMatch = amllMatch(b.first)
+                if (aMatch != bMatch) return@Comparator if (aMatch) -1 else 1
             }
+
+            // 5. fixed provider priority with TME rules
+            val bothTme = setOf("qq", "kugou").contains(a.first.provider.lowercase()) &&
+                    setOf("qq", "kugou").contains(b.first.provider.lowercase())
+            val tmeSource = currentSourceName?.lowercase()?.let { it.contains("qq") || it.contains("酷狗") } ?: false
+            if (bothTme && tmeSource) {
+                val lowerSource = currentSourceName?.lowercase() ?: ""
+                val preferKugou = lowerSource.contains("酷狗") && !lowerSource.contains("qq")
+                val preferQQ = lowerSource.contains("qq") && !lowerSource.contains("酷狗")
+                if (preferKugou) {
+                    if (a.first.provider.lowercase() == "kugou" && b.first.provider.lowercase() == "qq") return@Comparator -1
+                    if (a.first.provider.lowercase() == "qq" && b.first.provider.lowercase() == "kugou") return@Comparator 1
+                } else if (preferQQ) {
+                    if (a.first.provider.lowercase() == "qq" && b.first.provider.lowercase() == "kugou") return@Comparator -1
+                    if (a.first.provider.lowercase() == "kugou" && b.first.provider.lowercase() == "qq") return@Comparator 1
+                }
+                // else equal
+            } else {
+                val providerPriority = mapOf(
+                    "cache" to -1,
+                    "amll" to 0,
+                    "kugou" to 1,
+                    "netease" to 2,
+                    "ncm" to 2,
+                    "qq" to 3,
+                    "qqmusic" to 3
+                )
+                val pa = providerPriority[a.first.provider.lowercase()] ?: Int.MAX_VALUE
+                val pb = providerPriority[b.first.provider.lowercase()] ?: Int.MAX_VALUE
+                if (pa != pb) return@Comparator pa - pb
+            }
+
+            // 6. equal -> preserve arrival order
+            0
         }).map { it.first }
     }
 

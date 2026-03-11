@@ -2,11 +2,23 @@ package com.amll.droidmate.ui.viewmodel
 
 import android.app.Application
 import com.amll.droidmate.data.parser.LyricsFormat
+import com.amll.droidmate.data.repository.LyricsCacheRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+
+// network/util imports used by some tests
+import io.ktor.client.*
+import io.ktor.client.engine.*
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.http.headersOf
+import com.amll.droidmate.data.repository.LyricsRepository
+import kotlinx.coroutines.test.advanceUntilIdle
 
 /**
  * Basic unit tests for [CustomLyricsViewModel].  Since the implementation
@@ -94,6 +106,77 @@ class CustomLyricsViewModelTest {
     }
 
     @Test
+    fun `cache candidate always ranks first`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        val other = CustomLyricsCandidate("qq", "1", "T", "A", 1.0f, "", "", emptySet())
+        val cache = CustomLyricsCandidate("cache", "x", "T", "A", 0.0f, "", "", emptySet())
+        val list = listOf(other, cache)
+        assertEquals(cache, list.sortedWith(vm.candidateComparator).first())
+    }
+
+    @Test
+    fun `current source influences order after confidence and features`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        vm.updateCurrentSource("网易云音乐")
+        val a = CustomLyricsCandidate("qq", "1", "T", "A", 1f, "", "", emptySet())
+        val b = CustomLyricsCandidate("netease", "2", "T", "A", 1f, "", "", emptySet())
+        val sorted = listOf(a, b).sortedWith(vm.candidateComparator)
+        assertEquals(b, sorted.first())
+    }
+
+    @Test
+    fun `amll id prefix matching current source wins tie`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        vm.updateCurrentSource("QQ Music")
+        val amllMatch = CustomLyricsCandidate("amll", "qq:abc", "T", "A", 0.5f, "", "", emptySet())
+        val other = CustomLyricsCandidate("amll", "netease:123", "T", "A", 0.5f, "", "", emptySet())
+        val sorted = listOf(other, amllMatch).sortedWith(vm.candidateComparator)
+        assertEquals(amllMatch, sorted.first())
+    }
+
+    @Test
+    fun `qq vs kugou preference follows source when under tme`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        val qq = CustomLyricsCandidate("qq", "1", "T", "A", 0.5f, "", "", emptySet())
+        val kugou = CustomLyricsCandidate("kugou", "2", "T", "A", 0.5f, "", "", emptySet())
+
+        // current source QQ -> qq should win
+        vm.updateCurrentSource("QQ Music")
+        val sorted1 = listOf(kugou, qq).sortedWith(vm.candidateComparator)
+        assertEquals(qq, sorted1.first())
+
+        // current source Kugou -> kugou should win
+        vm.updateCurrentSource("酷狗播放器")
+        val sorted2 = listOf(qq, kugou).sortedWith(vm.candidateComparator)
+        assertEquals(kugou, sorted2.first())
+
+        // if source mentions both, default back to qq
+        vm.updateCurrentSource("QQ & 酷狗")
+        val sorted3 = listOf(kugou, qq).sortedWith(vm.candidateComparator)
+        assertEquals(qq, sorted3.first())
+    }
+
+    @Test
+    fun `provider priority used when all else equal`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        val p1 = CustomLyricsCandidate("qq", "1", "T", "A", 0.5f, "", "", emptySet())
+        val p2 = CustomLyricsCandidate("amll", "2", "T", "A", 0.5f, "", "", emptySet())
+        val sorted = listOf(p1, p2).sortedWith(vm.candidateComparator)
+        // amll has higher priority than qq according to map
+        assertEquals(p2, sorted.first())
+    }
+
+    @Test
+    fun `stable order preserved when fully tied`() = runTest {
+        val vm = CustomLyricsViewModel(Application())
+        val x = CustomLyricsCandidate("qq", "1", "T", "A", 0.5f, "", "", emptySet())
+        val y = CustomLyricsCandidate("qq", "2", "T", "A", 0.5f, "", "", emptySet())
+        val original = listOf(x, y)
+        val sorted = original.sortedWith(vm.candidateComparator)
+        assertEquals(original, sorted)
+    }
+
+    @Test
     fun `loadMore adds next batch of QQ results`() = runTest {
         // engine returns 5 QQ items whenever QQ endpoint is called, empty for others
         val qqItems = (1..5).joinToString(",") { i ->
@@ -110,7 +193,8 @@ class CustomLyricsViewModelTest {
         }
         val client = HttpClient(engine as HttpClientEngine)
         val fakeRepo = LyricsRepository(client)
-        val viewModel = CustomLyricsViewModel(Application(), lyricsRepository = fakeRepo, lyricsCacheRepository = fakeRepo)
+        val fakeCache = LyricsCacheRepository(Application())
+        val viewModel = CustomLyricsViewModel(Application(), lyricsRepository = fakeRepo, lyricsCacheRepository = fakeCache)
 
         // perform initial search to populate lastSearchTitle/artist
         viewModel.searchCandidates("x", "y")
@@ -135,7 +219,8 @@ class CustomLyricsViewModelTest {
         }
         val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
-        val vm = CustomLyricsViewModel(Application(), lyricsRepository = repo, lyricsCacheRepository = repo)
+        val cache = LyricsCacheRepository(Application())
+        val vm = CustomLyricsViewModel(Application(), lyricsRepository = repo, lyricsCacheRepository = cache)
 
         vm.searchCandidates("a", "b")
         advanceUntilIdle()

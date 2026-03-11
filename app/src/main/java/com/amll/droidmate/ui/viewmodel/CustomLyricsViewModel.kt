@@ -59,31 +59,102 @@ class CustomLyricsViewModel @JvmOverloads constructor(
     // HTTP client from ServiceLocator (can be overridden in tests)
     private val httpClient = ServiceLocator.provideHttpClient(application.applicationContext)
 
+    // 当前正在播放的来源名称
+    private var currentSourceName: String? = null
+
+    /**
+     * 外部可以调用以更新当前播放源的名字（如播放器应用名）。
+     * 当候选置信度和特性完全相等时，这个字符串用于打破平局。
+     */
+    fun updateCurrentSource(name: String?) {
+        currentSourceName = name
+    }
+
+    // 全面的候选比较逻辑，按以下优先级逐条判断：
+    // 1. 本地缓存最高
+    // 2. 置信度降序 + 特性数降序
+    // 3. currentSourceName 相关性
+    // 4. 固定 provider 优先级表
+    // 5. 返回 0 保留原有顺序 (先到先得)
+    internal fun compareCandidates(a: CustomLyricsCandidate, b: CustomLyricsCandidate): Int {
+        // 1. cache
+        val aCache = a.provider.equals("cache", true)
+        val bCache = b.provider.equals("cache", true)
+        if (aCache != bCache) return if (aCache) -1 else 1
+
+        // 2. confidence + features
+        val confDiff = a.confidence - b.confidence
+        if (confDiff != 0f) return -confDiff.compareTo(0f)
+        val featDiff = b.features.size - a.features.size
+        if (featDiff != 0) return featDiff
+
+        // 3. current source bias
+        currentSourceName?.let { source ->
+            val lower = source.lowercase()
+            val priorityList = when {
+                lower.contains("网易") -> listOf("netease")
+                lower.contains("qq") -> listOf("qq", "kugou")
+                lower.contains("酷狗") -> listOf("kugou", "qq")
+                else -> emptyList()
+            }
+            if (priorityList.isNotEmpty()) {
+                val ai = priorityList.indexOf(a.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                val bi = priorityList.indexOf(b.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                if (ai != bi) return ai - bi
+            }
+
+            // 3b. if one of the candidates is from AMLL DB and its songId has a
+            //    platform prefix matching the current source, favour it.
+            fun amllMatches(candidate: CustomLyricsCandidate): Boolean {
+                if (!candidate.provider.equals("amll", true)) return false
+                val parts = candidate.songId.split(":", limit = 2)
+                if (parts.size < 2) return false
+                val prefix = parts[0].lowercase()
+                return when {
+                    lower.contains("网易") -> prefix == "netease" || prefix == "ncm"
+                    lower.contains("qq") -> prefix == "qq" || prefix == "qqmusic"
+                    lower.contains("酷狗") -> prefix == "kugou"
+                    else -> false
+                }
+            }
+            val aMatch = amllMatches(a)
+            val bMatch = amllMatches(b)
+            if (aMatch != bMatch) return if (aMatch) -1 else 1
+        }
+
+        // 4. fixed provider priority
+        val bothTme = setOf("qq", "kugou").contains(a.provider.lowercase()) &&
+                setOf("qq", "kugou").contains(b.provider.lowercase())
+        val tmeSource = currentSourceName?.lowercase()?.let { it.contains("qq") || it.contains("酷狗") } ?: false
+        if (bothTme && tmeSource) {
+            val lowerSource = currentSourceName?.lowercase() ?: ""
+            val preferKugou = lowerSource.contains("酷狗") && !lowerSource.contains("qq")
+            val preferQQ = lowerSource.contains("qq") && !lowerSource.contains("酷狗")
+            if (preferKugou) {
+                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") return -1
+                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") return 1
+            } else if (preferQQ) {
+                if (a.provider.lowercase() == "qq" && b.provider.lowercase() == "kugou") return -1
+                if (a.provider.lowercase() == "kugou" && b.provider.lowercase() == "qq") return 1
+            }
+            // else equal order
+        } else {
+            val pa = providerPriority[a.provider.lowercase()] ?: Int.MAX_VALUE
+            val pb = providerPriority[b.provider.lowercase()] ?: Int.MAX_VALUE
+            if (pa != pb) return pa - pb
+        }
+
+        // 5. equal -> preserve insertion order
+        return 0
+    }
+
     // legacy comparator for individual updates; still used by appendCandidate
     internal val candidateComparator = Comparator<CustomLyricsCandidate> { a, b ->
-        // provider priority first
-        val pa = providerPriority[a.provider.lowercase()] ?: Int.MAX_VALUE
-        val pb = providerPriority[b.provider.lowercase()] ?: Int.MAX_VALUE
-        if (pa != pb) return@Comparator pa - pb
-
-        val diff = a.confidence - b.confidence
-        if (kotlin.math.abs(diff) > CONFIDENCE_THRESHOLD) {
-            -diff.compareTo(0f)
-        } else {
-            b.features.size - a.features.size
-        }
+        compareCandidates(a, b)
     }
 
-    // new comparator used for one‑shot sorting: ignore provider and sort purely
-    // by confidence then by the number of features supported.
-    internal val combinedComparator = Comparator<CustomLyricsCandidate> { a, b ->
-        val diff = a.confidence - b.confidence
-        if (diff != 0f) {
-            -diff.compareTo(0f)
-        } else {
-            b.features.size - a.features.size
-        }
-    }
+    // new comparator used for one‑shot sorting: simply reuse full comparator
+    internal val combinedComparator = candidateComparator
 
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates
