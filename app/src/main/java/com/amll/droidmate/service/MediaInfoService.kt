@@ -25,7 +25,7 @@ class MediaInfoService(private val context: Context) {
     private val mediaSessionManager: MediaSessionManager? = try {
         context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
     } catch (e: Exception) {
-        Timber.f(e, "Failed to get MediaSessionManager")
+        Timber.e(e, "Failed to get MediaSessionManager")
         null
     }
 
@@ -93,7 +93,7 @@ class MediaInfoService(private val context: Context) {
                                 ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_ART_URI)
                         }
                     } catch (e: Exception) {
-                        Timber.f(e, "Failed to get album art")
+                        Timber.e(e, "Failed to get album art")
                         null
                     }
                     
@@ -116,11 +116,11 @@ class MediaInfoService(private val context: Context) {
                 currentController = null
             }
         } catch (e: SecurityException) {
-            Timber.f("Permission denied to access media sessions")
+            Timber.e("Permission denied to access media sessions")
             // 尝试通过其他方式获取
             updateMediaInfoViaContentResolver()
         } catch (e: Exception) {
-            Timber.f(e, "Error updating media info")
+            Timber.e(e, "Error updating media info")
         }
     }
     
@@ -163,7 +163,7 @@ class MediaInfoService(private val context: Context) {
             Timber.d("Saved album art to cache: $uri")
             uri
         } catch (e: Exception) {
-            Timber.f(e, "Failed to save album art to cache")
+            Timber.e(e, "Failed to save album art to cache")
             null
         }
     }

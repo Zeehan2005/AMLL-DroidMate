@@ -251,11 +251,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Timber.i("Successfully fetched lyrics from ${result.source}")
                 } else {
                     _errorMessage.value = result.errorMessage ?: "获取歌词失败"
-                    Timber.f("Failed to fetch lyrics: ${result.errorMessage}")
+                    Timber.e("Failed to fetch lyrics: ${result.errorMessage}")
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "错误: ${e.message}"
-                Timber.f(e, "Error fetching lyrics")
+                Timber.e(e, "Error fetching lyrics")
             } finally {
                 _isLoading.value = false
             }
@@ -281,7 +281,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "转换错误: ${e.message}"
-                Timber.f(e, "Error converting LRC to TTML")
+                Timber.e(e, "Error converting LRC to TTML")
             }
         }
     }
@@ -318,7 +318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "应用歌词失败: ${e.message}"
-                Timber.f(e, "Error applying custom lyrics input")
+                Timber.e(e, "Error applying custom lyrics input")
             }
         }
     }

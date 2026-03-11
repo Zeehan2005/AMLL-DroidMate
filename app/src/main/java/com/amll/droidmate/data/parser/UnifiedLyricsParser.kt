@@ -111,7 +111,7 @@ object UnifiedLyricsParser {
             }
             
             if (lines.isEmpty()) {
-                Timber.f("No lyrics lines parsed")
+                Timber.e("No lyrics lines parsed")
                 return null
             }
             
@@ -132,7 +132,7 @@ object UnifiedLyricsParser {
                 lines = sortedLines
             )
         } catch (e: Exception) {
-            Timber.f(e, "Failed to parse lyrics")
+            Timber.e(e, "Failed to parse lyrics")
             null
         }
     }

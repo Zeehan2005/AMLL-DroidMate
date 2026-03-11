@@ -297,7 +297,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return mainLyrics.copy(lines = merged)
             
         } catch (e: Exception) {
-            Timber.f(e, "Error fetching QQ Music lyrics")
+            Timber.e(e, "Error fetching QQ Music lyrics")
             null
         }
     }
@@ -371,7 +371,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
 
             mainLyrics.copy(lines = mergeLyricLines(mainLyrics.lines, translationLines, romanizationLines))
         } catch (e: Exception) {
-            Timber.f(e, "QQ lyric_download failed, fallback to PlayLyricInfo")
+            Timber.e(e, "QQ lyric_download failed, fallback to PlayLyricInfo")
             null
         }
     }
@@ -622,7 +622,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return result
             
         } catch (e: Exception) {
-            Timber.f(e, "Error fetching Netease lyrics")
+            Timber.e(e, "Error fetching Netease lyrics")
             null
         }
     }
@@ -712,7 +712,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 .take(3)
                 .map { it.first }
         } catch (e: Exception) {
-            Timber.f(e, "Error searching Kugou")
+            Timber.e(e, "Error searching Kugou")
             emptyList()
         }
     }
@@ -812,7 +812,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             return ttml
             
         } catch (e: Exception) {
-            Timber.f(e, "Error fetching Kugou lyrics")
+            Timber.e(e, "Error fetching Kugou lyrics")
             null
         }
     }
@@ -1237,7 +1237,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             )
             ttml.copy(lines = merged)
         } catch (e: Exception) {
-            Timber.f(e, "Error parsing LRC")
+            Timber.e(e, "Error parsing LRC")
             null
         }
     }
@@ -1264,7 +1264,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             )
             ttml.copy(lines = merged)
         } catch (e: Exception) {
-            Timber.f(e, "Error parsing YRC")
+            Timber.e(e, "Error parsing YRC")
             null
         }
     }
@@ -1661,7 +1661,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             }
             return result
         } catch (e: Exception) {
-            Timber.f(e, "Error in auto-fetch lyrics")
+            Timber.e(e, "Error in auto-fetch lyrics")
             return LyricsResult(
                 isSuccess = false,
                 errorMessage = "获取歌词时发生错误: ${e.message}"
@@ -1713,7 +1713,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 )
             }
         } catch (e: Exception) {
-            Timber.f(e, "Error getting lyrics from $provider")
+            Timber.e(e, "Error getting lyrics from $provider")
             LyricsResult(
                 isSuccess = false,
                 errorMessage = "获取歌词出错: ${e.message}"
@@ -1884,7 +1884,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     lines = lines.sortedBy { it.startTime }
                 )
             } catch (e: Exception) {
-                Timber.f(e, "Error parsing TTML")
+                Timber.e(e, "Error parsing TTML")
                 null
             }
         }

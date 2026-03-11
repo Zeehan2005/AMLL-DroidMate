@@ -251,7 +251,7 @@ object TTMLConverter {
                 album = album
             )
         } catch (e: Exception) {
-            Timber.f(e, "Error parsing lyrics using Unilyric rules")
+            Timber.e(e, "Error parsing lyrics using Unilyric rules")
             null
         }
     }

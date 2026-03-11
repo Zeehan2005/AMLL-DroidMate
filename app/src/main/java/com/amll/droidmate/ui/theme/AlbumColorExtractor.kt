@@ -32,7 +32,7 @@ object AlbumColorExtractor {
         isDarkTheme: Boolean
     ): DynamicColorScheme? = withContext(Dispatchers.IO) {
         if (albumArtUri.isNullOrBlank()) {
-            Timber.f("Album art URI is null or blank")
+            Timber.e("Album art URI is null or blank")
             return@withContext null
         }
 
@@ -44,7 +44,7 @@ object AlbumColorExtractor {
 
             return@withContext createDynamicColorScheme(palette, isDarkTheme)
         } catch (e: Exception) {
-            Timber.f(e, "Failed to extract colors from album art: $albumArtUri")
+            Timber.e(e, "Failed to extract colors from album art: $albumArtUri")
             return@withContext null
         }
     }

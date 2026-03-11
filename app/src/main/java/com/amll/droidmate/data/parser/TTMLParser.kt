@@ -22,7 +22,7 @@ object TTMLParser {
             val doc = builder.parse(content.byteInputStream())
             parseTTMLDocument(doc)
         } catch (e: Exception) {
-            Timber.f(e, "Failed to parse TTML content")
+            Timber.e(e, "Failed to parse TTML content")
             emptyList()
         }
     }
@@ -57,7 +57,7 @@ object TTMLParser {
                 parseParagraph(pElement)?.let { parsedParagraphs.add(it) }
             }
         } catch (e: Exception) {
-            Timber.f(e, "Failed to parse TTML document structure")
+            Timber.e(e, "Failed to parse TTML document structure")
             return emptyList()
         }
 
@@ -530,7 +530,7 @@ object TTMLParser {
 
             (hours * 3600 + minutes * 60 + seconds) * 1000 + millis
         } catch (e: Exception) {
-            Timber.f(e, "Failed to parse time string: $timeStr")
+            Timber.e(e, "Failed to parse time string: $timeStr")
             0L
         }
     }
