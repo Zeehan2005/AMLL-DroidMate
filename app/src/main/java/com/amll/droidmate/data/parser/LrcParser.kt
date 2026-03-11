@@ -65,15 +65,11 @@ object LrcParser {
             val meaningful = group.filter { it.text.isNotEmpty() }
             if (meaningful.isNotEmpty()) {
                 val mainText = meaningful[0].text
-                val transText = meaningful.getOrNull(1)?.text
-                val romanText = meaningful.getOrNull(2)?.text
                 finalLines.add(
                     LyricLine(
                         startTime = startMs,
                         endTime = endMs,
                         text = mainText,
-                        translation = transText,
-                        transliteration = romanText,
                         words = listOf(
                             LyricWord(
                                 word = mainText,
