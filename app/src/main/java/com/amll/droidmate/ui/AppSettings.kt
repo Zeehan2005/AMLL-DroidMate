@@ -312,6 +312,18 @@ object AppSettings {
         prefs(context).putLong(KEY_LAST_UPDATE_CHECK_AT, timestampMillis)
     }
 
+    // time when user tapped “later” in update dialog; used to suppress automatic
+    // checks for the next 24 hours.
+    private const val KEY_LAST_UPDATE_LATER_AT = "last_update_later_at"
+
+    fun getLastUpdateLaterAt(context: Context): Long {
+        return prefs(context).getLong(KEY_LAST_UPDATE_LATER_AT, 0L)
+    }
+
+    fun setLastUpdateLaterAt(context: Context, timestampMillis: Long) {
+        prefs(context).putLong(KEY_LAST_UPDATE_LATER_AT, timestampMillis)
+    }
+
     fun isSkipPreviousRewindsEnabled(context: Context): Boolean {
         return prefs(context).getBoolean(KEY_SKIP_PREVIOUS_REWINDS, false)
     }

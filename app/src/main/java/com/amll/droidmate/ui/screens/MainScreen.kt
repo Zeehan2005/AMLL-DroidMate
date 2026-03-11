@@ -229,10 +229,14 @@ fun MainScreen() {
         if (!AppSettings.isAutoUpdateCheckEnabled(context)) return@LaunchedEffect
 
         val now = System.currentTimeMillis()
-        val lastCheck = AppSettings.getLastUpdateCheckAt(context)
+        val lastLater = AppSettings.getLastUpdateLaterAt(context)
         val oneDayMillis = 24L * 60 * 60 * 1000
-        if (now - lastCheck < oneDayMillis) return@LaunchedEffect
+        if (now - lastLater < oneDayMillis) {
+            // user pressed "later" less than 24h ago, skip check
+            return@LaunchedEffect
+        }
 
+        // always attempt check on every start if not suppressed
         val updateChannel = AppSettings.getUpdateChannel(context)
         val result = GitHubUpdateChecker.check(context, updateChannel)
         AppSettings.setLastUpdateCheckAt(context, now)
@@ -403,7 +407,10 @@ fun MainScreen() {
                     },
                     dismissButton = {
                         if (!autoUpdateDialogUrl.isNullOrBlank()) {
-                            TextButton(onClick = { showAutoUpdateDialog = false }) {
+                            TextButton(onClick = {
+                                AppSettings.setLastUpdateLaterAt(context, System.currentTimeMillis())
+                                showAutoUpdateDialog = false
+                            }) {
                                 Text("稍后")
                             }
                         }

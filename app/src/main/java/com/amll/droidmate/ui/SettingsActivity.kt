@@ -452,7 +452,10 @@ private fun SettingsPage(
                 },
                 dismissButton = {
                     if (!updateDialogUrl.isNullOrBlank()) {
-                        TextButton(onClick = { showUpdateDialog = false }) {
+                        TextButton(onClick = {
+                            AppSettings.setLastUpdateLaterAt(context, System.currentTimeMillis())
+                            showUpdateDialog = false
+                        }) {
                             Text("稍后")
                         }
                     }
