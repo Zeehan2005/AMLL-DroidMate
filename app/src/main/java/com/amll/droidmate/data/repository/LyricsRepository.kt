@@ -26,7 +26,10 @@ import timber.log.Timber
  * 歌词仓库 - 从多个来源获取和管理歌词
  * 基于 Unilyric 的多源搜索逻辑实现
  */
-open class LyricsRepository(private val httpClient: HttpClient) {
+open class LyricsRepository(
+    private val httpClient: HttpClient,
+    private val cacheRepo: LyricsCacheRepository? = null
+) {
 
     // exposed for testing
     internal enum class MatchType(val score: Int) {
@@ -1604,9 +1607,18 @@ open class LyricsRepository(private val httpClient: HttpClient) {
         currentSourceName: String? = null
     ): LyricsResult {
         // simplified flow: search and immediately use the top candidate
-        // 新增: 如果本地缓存（AMLL）中已有候选，则优先尝试返回它，无论置信度如何。
+        // 新增: 优先检查应用本地缓存（LyricsCacheRepository），如果存在则直接返回。
+        // 这是用户保存的歌词缓存，与 AM MLL DB 等来源无关。
         try {
             Timber.i("Auto-fetching lyrics for: $title - $artist")
+
+            // check local cached lyrics first
+            cacheRepo?.let {
+                getCachedLyrics(title, artist)?.let { cachedResult ->
+                    Timber.i("Returning lyrics from local cache: ${cachedResult.source}")
+                    return cachedResult
+                }
+            }
 
             var searchResults = searchLyrics(title, artist)
             if (searchResults.isEmpty()) {
@@ -1617,7 +1629,8 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 )
             }
 
-            // 优先尝试本地缓存候选（provider=="amll").
+            // 优先尝试来自 AMLL TTML 数据库的候选（provider=="amll"），
+            // 该库被视为高质量“缓存/权威来源”，但此时已经确认本地缓存不存在。
             val localCandidates = searchResults.filter { it.provider.equals("amll", ignoreCase = true) }
             if (localCandidates.isNotEmpty()) {
                 // 按置信度降序遍历，成功则直接返回
@@ -1674,6 +1687,22 @@ open class LyricsRepository(private val httpClient: HttpClient) {
      * @param title 歌曲标题（可选，用于更新元数据）
      * @param artist 歌手名（可选，用于更新元数据）
      */
+    /**
+     * 如果本地缓存（LyricsCacheRepository）有匹配项，则返回该结果。
+     * 子类可覆盖以模拟测试行为。
+     */
+    protected open suspend fun getCachedLyrics(title: String, artist: String): LyricsResult? {
+        val entry = cacheRepo?.findBySong(title, artist) ?: return null
+        val parsed = entry.ttmlContent.takeIf { it.isNotBlank() }
+            ?.let { parseTTML(it, entry.title, entry.artist) }
+            ?: return null
+        return LyricsResult(
+            isSuccess = true,
+            lyrics = parsed,
+            source = entry.source
+        )
+    }
+
     suspend fun getLyrics(
         provider: String,
         songId: String,

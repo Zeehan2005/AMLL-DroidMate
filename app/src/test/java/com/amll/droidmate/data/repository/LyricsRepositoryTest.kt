@@ -335,36 +335,54 @@ class LyricsRepositoryTest {
 
     @Test
     fun `fetchLyricsAuto prefers local cache when available`() = runTest {
+        var searched = false
         val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
             respond("", HttpStatusCode.OK)
         }) as HttpClientEngine)) {
-            override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
-                // local candidate has lower confidence than network one
-                return listOf(
-                    LyricsSearchResult(provider = "netease", songId = "n", title = "t", artist = "a", confidence = 0.99f),
-                    LyricsSearchResult(provider = "amll", songId = "a", title = "t", artist = "a", confidence = 0.50f)
+            override suspend fun getCachedLyrics(title: String, artist: String): LyricsResult? {
+                return LyricsResult(
+                    isSuccess = true,
+                    lyrics = com.amll.droidmate.domain.model.TTMLLyrics(
+                        metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
+                        lines = emptyList()
+                    ),
+                    source = "local"
                 )
             }
 
-            override suspend fun getAMLL_TTMLLyrics(
-                songId: String,
-                title: String?,
-                artist: String?
-            ) = com.amll.droidmate.domain.model.TTMLLyrics(
-                metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
-                lines = emptyList()
-            )
-
-            override suspend fun getNeteaseLyrics(songId: String, title: String?, artist: String?) =
-                com.amll.droidmate.domain.model.TTMLLyrics(
-                    metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
-                    lines = emptyList()
-                )
+            override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
+                searched = true
+                return emptyList()
+            }
         }
 
         val res = fake.fetchLyricsAuto("t", "a")
         assertTrue(res.isSuccess)
-        assertTrue(res.source?.contains("AMLL") == true, "expected local cache to win even with lower confidence")
+        assertEquals("local", res.source)
+        assertFalse(searched, "searchLyrics should not be called when cache exists")
+    }
+
+    @Test
+    fun `fetchLyricsAuto returns cache entry early`() = runTest {
+        val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
+            respond("", HttpStatusCode.OK)
+        }) as HttpClientEngine)) {
+            override suspend fun getCachedLyrics(title: String, artist: String): LyricsResult? {
+                return LyricsResult(isSuccess = true, lyrics = com.amll.droidmate.domain.model.TTMLLyrics(
+                    metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "x", artist = "y"),
+                    lines = emptyList()),
+                    source = "cached"
+                )
+            }
+
+            override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
+                error("search should be bypassed when cache found")
+            }
+        }
+
+        val r = fake.fetchLyricsAuto("x", "y")
+        assertTrue(r.isSuccess)
+        assertEquals("cached", r.source)
     }
 
     @Test

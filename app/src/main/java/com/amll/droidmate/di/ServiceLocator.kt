@@ -14,7 +14,7 @@ object ServiceLocator {
     fun provideHttpClient(context: Context) = HttpClientFactory.create(context)
 
     fun provideLyricsRepository(context: Context): LyricsRepository =
-        LyricsRepository(provideHttpClient(context))
+        LyricsRepository(provideHttpClient(context), provideLyricsCacheRepository(context))
 
     fun provideLyricsCacheRepository(context: Context): LyricsCacheRepository =
         LyricsCacheRepository(context)
