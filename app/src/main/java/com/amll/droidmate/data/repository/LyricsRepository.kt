@@ -1029,11 +1029,12 @@ open class LyricsRepository(
             "remix", "live", "concert","dj", "edit", "mix", "acoustic",
             "instrumental", "extended", "karaoke", "remastered", "rework",
             "re-edit", "unplugged", "piano", "strings",
-            "orchestral", "demo", "remaster", "ringtone",
+            "orchestral", "demo", "remaster", "ringtone", "slowed", "sped up", "slow", "fast",
+            "tiktok"
             // Chinese equivalents / additional keywords
             "混音", "现场", "演唱会", "晚会", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
             "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作", "片段",
-            "铃声"
+            "铃声", "慢速", "快速", "加速", "减速"，"抖音"
         )
         val lower = s.lowercase()
 
