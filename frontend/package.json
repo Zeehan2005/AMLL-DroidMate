@@ -18,6 +18,7 @@
     "@applemusic-like-lyrics/react": "^0.2.0",
     "@pixi/core": "^7.4.3",
     "@pixi/utils": "^7.4.3",
+    "@vitejs/plugin-react": "^5.1.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "vite": "^7.3.1"

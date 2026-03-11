@@ -94,6 +94,62 @@ class CustomLyricsViewModelTest {
     }
 
     @Test
+    fun `loadMore adds next batch of QQ results`() = runTest {
+        // engine returns 5 QQ items whenever QQ endpoint is called, empty for others
+        val qqItems = (1..5).joinToString(",") { i ->
+            "{\"mid\":\"m$i\",\"id\":$i,\"title\":\"T$i\",\"singer\":[{\"name\":\"A\"}]}"
+        }
+        val qqBody = "{\"req_1\":{\"data\":{\"body\":{\"song\":{\"list\":[$qqItems]}}}}}"
+        val engine = MockEngine { request ->
+            if (request.url.toString().contains("musicu.fcg")) {
+                respond(qqBody, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
+            } else {
+                // generic empty payload for other sources
+                respond("{\"result\":{\"songs\":[]},\"code\":200}", HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
+            }
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val fakeRepo = LyricsRepository(client)
+        val viewModel = CustomLyricsViewModel(Application(), lyricsRepository = fakeRepo, lyricsCacheRepository = fakeRepo)
+
+        // perform initial search to populate lastSearchTitle/artist
+        viewModel.searchCandidates("x", "y")
+        advanceUntilIdle()
+
+        // load first batch
+        viewModel.loadMore("qq")
+        advanceUntilIdle()
+        assertEquals(3, viewModel.candidates.value.size)
+
+        // load second batch
+        viewModel.loadMore("qq")
+        advanceUntilIdle()
+        assertEquals(5, viewModel.candidates.value.size)
+    }
+
+    @Test
+    fun `new search resets pagination offsets`() = runTest {
+        val engine = MockEngine { request ->
+            respond("{\"result\":{\"songs\":[]},\"code\":200}", HttpStatusCode.OK,
+                headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        val vm = CustomLyricsViewModel(Application(), lyricsRepository = repo, lyricsCacheRepository = repo)
+
+        vm.searchCandidates("a", "b")
+        advanceUntilIdle()
+        vm.loadMore("qq")
+        advanceUntilIdle()
+        // offsets should now be nonzero
+        vm.searchCandidates("a", "b")
+        advanceUntilIdle()
+        vm.loadMore("qq")
+        advanceUntilIdle()
+        assertTrue(vm.candidates.value.isEmpty())
+    }
+
+    @Test
     fun `formatAutoSource adds prefix and handles various providers`() {
         // provider only
         val s1 = com.amll.droidmate.data.repository.LyricsRepository.formatAutoSource(

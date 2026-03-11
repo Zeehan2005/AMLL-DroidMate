@@ -35,6 +35,53 @@ class LyricsRepositoryTest {
     }
 
     @Test
+    fun `searchNetease returns multiple candidates up to three`() = runTest {
+        // simulate a response with 4 candidate songs, only 3 should be returned
+        val songsJson = (1..4).joinToString(",") { i ->
+            "{\"id\":$i,\"name\":\"Title$i\",\"ar\":[{\"name\":\"Artist\"}],\"dt\":300000}"
+        }
+        val body = "{\"result\":{\"songs\":[${songsJson}]},\"code\":200}"
+        val engine = MockEngine { _ ->
+            respond(body, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        val results = repo.searchNetease("t","a")
+        assertEquals(3, results.size)
+    }
+
+    @Test
+    fun `searchQQMusic also limits to three`() = runTest {
+        // craft minimal QQ JSON structure with four items
+        val listItems = (1..4).joinToString(",") { i ->
+            "{\"mid\":\"m$i\",\"id\":$i,\"title\":\"T$i\",\"singer\":[{\"name\":\"A\"}]}"
+        }
+        val body = "{\"req_1\":{\"data\":{\"body\":{\"song\":{\"list\":[$listItems]}}}}}"
+        val engine = MockEngine { _ ->
+            respond(body, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        val results = repo.searchQQMusic("x","y")
+        assertEquals(3, results.size)
+    }
+
+    @Test
+    fun `searchKugou also limits to three`() = runTest {
+        val infoItems = (1..4).joinToString(",") { i ->
+            "{\"hash\":\"h$i\",\"songname\":\"T$i\",\"singername\":\"A\",\"album_name\":\"AL\",\"duration\":300}"
+        }
+        val body = "{\"data\":{\"info\":[$infoItems]}}"
+        val engine = MockEngine { _ ->
+            respond(body, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        val results = repo.searchKugou("x","y")
+        assertEquals(3, results.size)
+    }
+
+    @Test
     fun `getAMLL_TTMLLyrics uses platform prefix when provided`() = runTest {
         var seenUrl: String? = null
         val engine = MockEngine { request ->
@@ -211,16 +258,38 @@ class LyricsRepositoryTest {
         val client = HttpClient(engine as HttpClientEngine)
         val repo = LyricsRepository(client)
 
-        val ordered = repo.adjustResultsForFeatures(listOf(result1, result2))
+        val ordered = repo.adjustResultsForFeatures(listOf(result1, result2), currentSourceName = null)
         // result1 has higher confidence, so it should come first
         assertEquals(result1, ordered.first())
 
         // if confidences tie, features should break the tie
         val result3 = result1.copy(confidence = 0.90f)
         val result4 = result2.copy(confidence = 0.90f)
-        val ordered2 = repo.adjustResultsForFeatures(listOf(result3, result4))
+        val ordered2 = repo.adjustResultsForFeatures(listOf(result3, result4), currentSourceName = null)
         // message goes first in JUnit assertEquals
         assertEquals("equal confidence, candidate with features wins", result4, ordered2.first())
+    }
+
+    @Test
+    fun `adjustResultsForFeatures respects source name bias`() = runTest {
+        val repo = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
+        val netease = LyricsSearchResult(provider = "netease", songId = "1", title = "t", artist = "a", confidence = 0.9f)
+        val qq = LyricsSearchResult(provider = "qq", songId = "2", title = "t", artist = "a", confidence = 0.9f)
+        val kugou = LyricsSearchResult(provider = "kugou", songId = "3", title = "t", artist = "a", confidence = 0.9f)
+
+        // source contains 网易
+        val ord1 = repo.adjustResultsForFeatures(listOf(qq, netease, kugou), currentSourceName = "网易云")
+        assertEquals(netease, ord1.first())
+
+        // source contains QQ
+        val ord2 = repo.adjustResultsForFeatures(listOf(kugou, qq, netease), currentSourceName = "QQ Music")
+        assertEquals(qq, ord2.first())
+        assertEquals(kugou, ord2[1])
+
+        // source contains 酷狗
+        val ord3 = repo.adjustResultsForFeatures(listOf(netease, kugou, qq), currentSourceName = "酷狗概念版")
+        assertEquals(kugou, ord3.first())
+        assertEquals(qq, ord3[1])
     }
 
     @Test
@@ -258,10 +327,79 @@ class LyricsRepositoryTest {
             }
         }
 
-        val result = fake.fetchLyricsAuto("t", "a")
+        val result = fake.fetchLyricsAuto("t", "a", currentSourceName = null)
         assertTrue(result.isSuccess)
         // candidate 1 should be chosen because it has higher confidence
         assertTrue(result.source?.contains("(1)") == true)
+    }
+
+    @Test
+    fun `fetchLyricsAuto prefers local cache when available`() = runTest {
+        val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
+            respond("", HttpStatusCode.OK)
+        }) as HttpClientEngine)) {
+            override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
+                // local candidate has lower confidence than network one
+                return listOf(
+                    LyricsSearchResult(provider = "netease", songId = "n", title = "t", artist = "a", confidence = 0.99f),
+                    LyricsSearchResult(provider = "amll", songId = "a", title = "t", artist = "a", confidence = 0.50f)
+                )
+            }
+
+            override suspend fun getAMLL_TTMLLyrics(
+                songId: String,
+                title: String?,
+                artist: String?
+            ) = com.amll.droidmate.domain.model.TTMLLyrics(
+                metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
+                lines = emptyList()
+            )
+
+            override suspend fun getNeteaseLyrics(songId: String, title: String?, artist: String?) =
+                com.amll.droidmate.domain.model.TTMLLyrics(
+                    metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
+                    lines = emptyList()
+                )
+        }
+
+        val res = fake.fetchLyricsAuto("t", "a")
+        assertTrue(res.isSuccess)
+        assertTrue(res.source?.contains("AMLL") == true, "expected local cache to win even with lower confidence")
+    }
+
+    @Test
+    fun `fetchLyricsAuto respects source name when fallback order applies`() = runTest {
+        val fake = object : LyricsRepository(HttpClient((MockEngine { _ ->
+            respond("", HttpStatusCode.OK)
+        }) as HttpClientEngine)) {
+            override suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult> {
+                // two equal-confidence results from different providers
+                return listOf(
+                    LyricsSearchResult(provider = "qq", songId = "q", title = "t", artist = "a", confidence = 0.90f),
+                    LyricsSearchResult(provider = "kugou", songId = "k", title = "t", artist = "a", confidence = 0.90f)
+                )
+            }
+
+            override suspend fun getAMLL_TTMLLyrics(songId: String, title: String?, artist: String?) = null
+            override suspend fun getQQMusicLyrics(songId: String, title: String?, artist: String?) =
+                com.amll.droidmate.domain.model.TTMLLyrics(
+                    metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
+                    lines = emptyList()
+                )
+            override suspend fun getKugouLyrics(songId: String, title: String?, artist: String?) =
+                com.amll.droidmate.domain.model.TTMLLyrics(
+                    metadata = com.amll.droidmate.domain.model.TTMLMetadata(title = "t", artist = "a"),
+                    lines = emptyList()
+                )
+        }
+
+        // bias towards QQ
+        val r1 = fake.fetchLyricsAuto("t", "a", currentSourceName = "QQ Music")
+        assertTrue(r1.source?.contains("QQ") == true)
+
+        // bias towards Kugou
+        val r2 = fake.fetchLyricsAuto("t", "a", currentSourceName = "酷狗播放器")
+        assertTrue(r2.source?.contains("酷狗") == true)
     }
 
     @Test

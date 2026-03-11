@@ -33,6 +33,8 @@ import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material.ripple.rememberRipple
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -194,6 +196,17 @@ fun MainScreen() {
                     source = source
                 )
             }
+        }
+    }
+
+    // bubble shown when automatic fetch takes too long
+    var showMatchBubble by remember { mutableStateOf(false) }
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
+            delay(5000L)
+            if (isLoading) showMatchBubble = true
+        } else {
+            showMatchBubble = false
         }
     }
 
@@ -472,6 +485,41 @@ fun MainScreen() {
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        // bubble hint if lyrics fetch long-running
+                        if (showMatchBubble) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "正在匹配更优歌词",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontSize = 14.sp
+                                )
+                                Button(
+                                    onClick = {
+                                        val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                            putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                            putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                        }
+                                        customLyricsLauncher.launch(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("自选歌词", fontSize = 14.sp)
+                                }
+                            }
+                        }
+
                         // placeholder text when lyrics not available
                         if (currentLyrics == null && !spinnerVisible) {
                             Box(
@@ -576,6 +624,41 @@ fun MainScreen() {
             ),
             modifier = Modifier.fillMaxSize()
         ) {
+            // display matching bubble also in fullscreen mode
+            if (showMatchBubble) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "正在匹配更优歌词",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 14.sp
+                    )
+                    Button(
+                        onClick = {
+                            val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                            }
+                            customLyricsLauncher.launch(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("自选歌词", fontSize = 14.sp)
+                    }
+                }
+            }
+
             var controlsVisible by remember { mutableStateOf(true) }
             var hideControlsJob by remember { mutableStateOf<Job?>(null) }
             val scope = rememberCoroutineScope()
@@ -735,6 +818,45 @@ fun MainScreen() {
                         contentDescription = "退出全屏",
                         tint = Color.White.copy(alpha = 0.9f)
                     )
+                }
+
+                // fullscreen bubble positioned below back button, nearly full width with padding and rounded corners
+                if (showMatchBubble) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 88.dp, start = 16.dp, end = 16.dp) // avoid touching edges
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "正在匹配更优歌词",
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            fontSize = 14.sp
+                        )
+                        Button(
+                            onClick = {
+                                val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                    putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                    putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                }
+                                customLyricsLauncher.launch(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("自选歌词", fontSize = 14.sp)
+                        }
+                    }
                 }
 
                 // 播放控制按钮 - 透明背景，底部居中

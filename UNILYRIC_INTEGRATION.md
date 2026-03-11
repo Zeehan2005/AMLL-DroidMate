@@ -179,10 +179,13 @@ val lyrics = lyricsRepository.getLyrics(
 #### fetchLyricsAuto()
 **最推荐的方法** - 自动搜索并选择最佳来源
 
+> 会优先检查并返回本地 AMLL 缓存的歌词，如果存在则不再发起其它网络请求。
+
 ```kotlin
 suspend fun fetchLyricsAuto(
     title: String,
-    artist: String
+    artist: String,
+    currentSourceName: String? = null // 可选的播放来源名称，用于同分时优先排序
 ): LyricsResult
 ```
 
@@ -214,7 +217,7 @@ suspend fun searchNetease(title: String, artist: String): LyricsSearchResult?
 suspend fun getNeteaseLyrics(songId: String): TTMLLyrics?
 
 // QQ音乐
-suspend fun searchQQMusic(title: String, artist: String): LyricsSearchResult?
+suspend fun searchQQMusic(title: String, artist: String): List<LyricsSearchResult>  // returns top three matches
 suspend fun getQQMusicLyrics(songMid: String): TTMLLyrics?
 
 // 酷狗音乐

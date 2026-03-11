@@ -119,14 +119,14 @@ private fun CustomLyricsPage(
     onBack: () -> Unit,
     onApply: (String) -> Unit
 ) {
-    val viewModel: CustomLyricsViewModel = viewModel()
-    val candidates by viewModel.candidates.collectAsState()
+    val vm: CustomLyricsViewModel = viewModel()
+    val candidates by vm.candidates.collectAsState()
     // Hide local-cache entries from the displayed list
     val visibleCandidates = candidates.filter { it.provider.lowercase() != "cache" }
-    val isSearching by viewModel.isSearching.collectAsState()
-    val isApplying by viewModel.isApplying.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
-    val appliedLyricsText by viewModel.appliedLyricsText.collectAsState()
+    val isSearching by vm.isSearching.collectAsState()
+    val isApplying by vm.isApplying.collectAsState()
+    val errorMessage by vm.errorMessage.collectAsState()
+    val appliedLyricsText by vm.appliedLyricsText.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var manualText by remember { mutableStateOf("") }
 
@@ -141,7 +141,7 @@ private fun CustomLyricsPage(
                     val fileContent = inputStream.bufferedReader().use { it.readText() }
                     manualText = fileContent
                     // 自动应用导入的歌词
-                    viewModel.applyManualInput(fileContent, title, artist)
+                    vm.applyManualInput(fileContent, title, artist)
                 } else {
                     // Error reading file
                 }
@@ -152,13 +152,13 @@ private fun CustomLyricsPage(
     }
 
     LaunchedEffect(title, artist) {
-        viewModel.searchCandidates(title, artist)
+        vm.searchCandidates(title, artist)
     }
 
     LaunchedEffect(appliedLyricsText) {
         if (!appliedLyricsText.isNullOrBlank()) {
             onApply(appliedLyricsText!!)
-            viewModel.consumeAppliedLyricsText()
+            vm.consumeAppliedLyricsText()
         }
     }
 
@@ -206,6 +206,13 @@ private fun CustomLyricsPage(
                 style = MaterialTheme.typography.titleMedium
             )
 
+            // new explanatory subtitle
+            Text(
+                text = "按照推荐排序，因此新出现的选项也可能出现在上方。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             if (isSearching && candidates.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -246,8 +253,29 @@ private fun CustomLyricsPage(
                     CandidateItem(
                         candidate = candidate,
                         isApplying = isApplying,
-                        onUse = { viewModel.applyCandidate(candidate) }
+                        onUse = { vm.applyCandidate(candidate) }
                     )
+                }
+
+                // 按钮项可以放在列表底部，这样在滚动列表时也可见
+                item {
+                    if (visibleCandidates.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Button(onClick = {
+                                // 对当前已显示的每个来源请求更多
+                                visibleCandidates.map { it.provider.lowercase() }
+                                    .distinct()
+                                    .forEach { prov -> vm.loadMore(prov) }
+                            }) {
+                                Text("查询更多选项")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -267,7 +295,7 @@ private fun CustomLyricsPage(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { viewModel.applyManualInput(manualText, title, artist) },
+                    onClick = { vm.applyManualInput(manualText, title, artist) },
                     enabled = manualText.isNotBlank() && !isApplying,
                     modifier = Modifier.weight(1f)
                 ) {

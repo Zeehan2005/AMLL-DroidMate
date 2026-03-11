@@ -14,7 +14,7 @@
 
 **QQ音乐**
 ```kotlin
-suspend fun searchQQMusic(title: String, artist: String): LyricsSearchResult?
+suspend fun searchQQMusic(title: String, artist: String): List<LyricsSearchResult>  // now returns up to three candidates
 suspend fun getQQMusicLyrics(songMid: String): TTMLLyrics?
 ```
 - 搜索API: `https://u.y.qq.com/cgi-bin/musicu.fcg`
@@ -55,12 +55,17 @@ suspend fun searchLyrics(title: String, artist: String): List<LyricsSearchResult
 
 **fetchLyricsAuto()** - 全自动智能获取 (推荐)
 ```kotlin
-suspend fun fetchLyricsAuto(title: String, artist: String): LyricsResult
+suspend fun fetchLyricsAuto(
+    title: String,
+    artist: String,
+    currentSourceName: String? = null  // 可选的播放来源名称，用于同分时优先排序
+): LyricsResult
 ```
 工作流程:
 1. 调用 searchLyrics() 获取所有搜索结果
-2. 如果有网易云结果,优先尝试 AMLL TTML DB
-3. AMLL失败后,按置信度依次尝试各平台直接API
+2. 若搜索结果中包含任何 AMLL（本地缓存）条目，则按置信度降序尝试这些缓存条目，成功则立即返回。
+   这保证了本地已有歌词优先匹配，避免不必要的网络请求。
+3. 缓存全部失败或不存在时，继续使用常规流程：按置信度依次尝试各平台直接API
 4. 返回第一个成功的结果
 
 **getLyrics()** - 增强版(支持所有provider)
@@ -90,6 +95,14 @@ private fun calculateMatchConfidence(
 ## 2026-03-10
 - 增强匹配系统：
   - 添加音调/重音去除，标点、"feat" 等标签过滤
+
+## 2026-03-11
+- 新增 `fetchLyricsAuto` 的 `currentSourceName` 可选参数，用以
+  在搜索结果置信度相同的情况下进行偏好排序。
+  支持在 `adjustResultsForFeatures` 中传入播放来源名称（例如
+  应用名），并在候选完全平分时根据关键字“网易”、“QQ”、“酷狗”
+  优先选取对应平台。
+- 相应地更新文档与单元测试以覆盖新规则。
   - 支持 dash/paren 等价性、标题前置冠词移除
   - 艺术家匹配兼容 &/and 以及去除缩写差异
   - 调整权重和阈值以减少误判

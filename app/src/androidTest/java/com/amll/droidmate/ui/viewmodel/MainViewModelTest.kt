@@ -11,6 +11,7 @@ import com.amll.droidmate.service.LyricNotificationManager
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.test.runTest
 import org.junit.runner.RunWith
 
 /**
@@ -127,5 +128,31 @@ class MainViewModelTest {
         viewModel.updateLyricNotification(lyrics, playing)
         assertEquals(2, fakeManager.shownTimes)
         assertTrue(fakeManager.lastOngoing == true)
+    }
+
+    @Test
+    fun `fetchLyrics uses package name to bias search`() = runTest {
+        val captured = mutableListOf<String?>()
+        val fakeRepo = object : LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) } as HttpClientEngine)) {
+            override suspend fun fetchLyricsAuto(
+                title: String,
+                artist: String,
+                currentSourceName: String?
+            ): LyricsResult {
+                captured += currentSourceName
+                return LyricsResult(isSuccess = false)
+            }
+        }
+        viewModel.lyricsRepository = fakeRepo
+        val playing = NowPlayingMusic(
+            title = "t", artist = "a", packageName = "com.netease.cloudmusic",
+            currentPosition = 0, isPlaying = true
+        )
+        // update the nowPlayingMusic directly so fetchLyrics uses it
+        viewModel._nowPlayingMusic.value = playing
+        viewModel.fetchLyrics()
+        kotlinx.coroutines.test.advanceUntilIdle()
+        assertEquals(1, captured.size)
+        assertTrue(captured[0]?.contains("网易") == true || captured[0]?.contains("netease", ignoreCase = true) == true)
     }
 }

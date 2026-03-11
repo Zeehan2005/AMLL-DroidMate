@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.amll.droidmate.data.converter.TTMLConverter
 import com.amll.droidmate.data.repository.LyricsCacheRepository
 import com.amll.droidmate.data.repository.LyricsRepository
+import com.amll.droidmate.ui.screens.getAppNameFromPackage
 import com.amll.droidmate.di.ServiceLocator
 import com.amll.droidmate.domain.model.NowPlayingMusic
 import com.amll.droidmate.domain.model.TTMLLyrics
@@ -28,7 +29,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // HTTP Client & 仓库（由 ServiceLocator 提供以便集中管理）
     private val httpClient = ServiceLocator.provideHttpClient(context)
-    private val lyricsRepository = ServiceLocator.provideLyricsRepository(context)
+    // make this mutable so tests can inject a fake repository if needed
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal var lyricsRepository = ServiceLocator.provideLyricsRepository(context)
     private val lyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(context)
     
     // 服务
@@ -229,10 +232,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 
-                // 使用智能多源搜索
+                // 使用智能多源搜索，向仓库提供当前播放源名称以便打分
+                val sourceName = getAppNameFromPackage(context, music.packageName)
                 val result = lyricsRepository.fetchLyricsAuto(
                     title = music.title,
-                    artist = music.artist
+                    artist = music.artist,
+                    currentSourceName = sourceName
                 )
                 
                 if (result.isSuccess && result.lyrics != null) {

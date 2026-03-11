@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amll.droidmate.data.converter.TTMLConverter
 import com.amll.droidmate.data.repository.LyricsRepository
+import com.amll.droidmate.data.repository.LyricsCacheRepository
 import com.amll.droidmate.di.ServiceLocator
 import com.amll.droidmate.domain.model.LyricsSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,10 +33,18 @@ data class CustomLyricsCandidate(
     val features: Set<com.amll.droidmate.domain.model.LyricsFeature> = emptySet()
 )
 
-class CustomLyricsViewModel(application: Application) : AndroidViewModel(application) {
+class CustomLyricsViewModel @JvmOverloads constructor(
+    application: Application,
+    private val lyricsRepository: LyricsRepository = ServiceLocator.provideLyricsRepository(application.applicationContext),
+    private val lyricsCacheRepository: LyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application.applicationContext)
+) : AndroidViewModel(application) {
 
     // 当前歌曲唯一标识（title + artist）
     private var currentSongKey: String? = null
+    // remember most recent search terms for pagination
+    private var lastSearchTitle: String = ""
+    private var lastSearchArtist: String = ""
+    private val offsets = mutableMapOf<String, Int>()
 
     private val providerPriority = mapOf(
         "cache" to -1,   // 本地缓存最高优先级
@@ -47,10 +56,8 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         "qqmusic" to 3
     )
 
-    // HTTP client & repositories from ServiceLocator (can be overridden in tests)
+    // HTTP client from ServiceLocator (can be overridden in tests)
     private val httpClient = ServiceLocator.provideHttpClient(application.applicationContext)
-    private val lyricsRepository = ServiceLocator.provideLyricsRepository(application.applicationContext)
-    private val lyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application.applicationContext)
 
     // legacy comparator for individual updates; still used by appendCandidate
     internal val candidateComparator = Comparator<CustomLyricsCandidate> { a, b ->
@@ -81,6 +88,12 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
     private val _candidates = MutableStateFlow<List<CustomLyricsCandidate>>(emptyList())
     val candidates: StateFlow<List<CustomLyricsCandidate>> = _candidates
 
+    // helper used by searchCandidates and loadMore
+    private suspend fun publishCandidate(candidate: CustomLyricsCandidate) {
+        _candidates.value = (_candidates.value + candidate)
+            .sortedWith(combinedComparator)
+    }
+
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching
 
@@ -103,18 +116,18 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
         // 更新当前歌曲唯一标识
         val songKey = "$title-$artist"
         currentSongKey = songKey
+        // remember search terms for pagination and reset offsets
+        lastSearchTitle = title
+        lastSearchArtist = artist
+        offsets.clear()
 
         viewModelScope.launch {
             _isSearching.value = true
             _errorMessage.value = null
             _candidates.value = emptyList()
 
-            // helper to add a candidate and trigger sort
-            suspend fun publishCandidate(candidate: CustomLyricsCandidate) {
-                // insert candidate without features
-                _candidates.value = (_candidates.value + candidate)
-                    .sortedWith(combinedComparator)
-            }
+            // NOTE: publishCandidate is now defined outside so it can also be
+        // invoked from loadMore().
 
             try {
                 // 缓存优先加入
@@ -282,6 +295,34 @@ class CustomLyricsViewModel(application: Application) : AndroidViewModel(applica
             return base
         }
 
+    }
+
+    /**
+     * Load an additional batch of candidates for a given provider.  The
+     * view model maintains offset state so repeated calls page through
+     * the results in groups of three.
+     */
+    fun loadMore(provider: String) {
+        val title = lastSearchTitle
+        val artist = lastSearchArtist
+        if (title.isBlank() && artist.isBlank()) return
+        viewModelScope.launch {
+            // after repository change each search returns max 3 candidates; offsets
+            // can still be used to track how many we have shown locally but the
+            // data source itself does not support pagination.  we therefore ignore
+            // the stored offset when querying and instead update it afterwards.
+            val newResults = when (provider.lowercase()) {
+                "qq", "qqmusic" -> lyricsRepository.searchQQMusic(title, artist)
+                "netease", "ncm" -> lyricsRepository.searchNetease(title, artist)
+                "kugou" -> lyricsRepository.searchKugou(title, artist)
+                else -> emptyList()
+            }
+            val start = offsets.getOrDefault(provider, 0)
+            offsets[provider] = start + newResults.size
+            for (r in newResults) {
+                publishCandidate(r.toCandidate())
+            }
+        }
     }
 
     fun applyManualInput(input: String, title: String, artist: String) {

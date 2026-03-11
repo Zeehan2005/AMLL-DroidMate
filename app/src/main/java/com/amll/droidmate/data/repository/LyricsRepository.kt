@@ -54,10 +54,13 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 从 QQ 音乐搜索歌词
      */
-    suspend fun searchQQMusic(title: String, artist: String): LyricsSearchResult? {
+    /**
+     * 从 QQ 音乐搜索歌词，返回最多三个最佳候选。
+     */
+    suspend fun searchQQMusic(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
-            
+
             // 对齐 Unilyric-lite: req_1 + POST JSON 到 musicu.fcg
             val requestBody = buildJsonObject {
                 putJsonObject("req_1") {
@@ -71,21 +74,21 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     }
                 }
             }
-            
+
             val searchResponse = httpClient.post("https://u.y.qq.com/cgi-bin/musicu.fcg") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody.toString())
             }
-            
+
             if (!searchResponse.status.isSuccess()) {
                 Timber.w("QQ Music search failed: ${searchResponse.status}")
-                return null
+                return emptyList()
             }
-            
+
             val json = Json { ignoreUnknownKeys = true }
             val responseBody = searchResponse.body<String>()
             val responseJson = json.parseToJsonElement(responseBody).jsonObject
-            
+
             // 解析搜索结果
             val songList = responseJson["req_1"]
                 ?.jsonObject?.get("data")
@@ -93,16 +96,14 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 ?.jsonObject?.get("song")
                 ?.jsonObject?.get("list")
                 ?.jsonArray
-            
+
             if (songList.isNullOrEmpty()) {
                 Timber.d("No QQ Music results found for: $keyword")
-                return null
+                return emptyList()
             }
-            
-            // 遍历所有候选，找到最佳匹配（对齐 Unilyric 逻辑）
-            var bestMatch: LyricsSearchResult? = null
-            var bestScore = -1
-            
+
+            // 收集所有候选并评估匹配度
+            val candidates = mutableListOf<Pair<LyricsSearchResult, Int>>()
             for (songElement in songList) {
                 val song = songElement.jsonObject
                 val songMid = song["mid"]?.jsonPrimitive?.content ?: continue
@@ -113,35 +114,29 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 val singerName = song["singer"]?.jsonArray
                     ?.joinToString(", ") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "" }
                     ?.takeIf { it.isNotBlank() } ?: continue
-                
-                // 计算匹配度
+
                 val matchEval = evaluateMatch(title, artist, songTitle, singerName)
                 val matchType = MatchType.valueOf(matchEval.matchType)
-                
-                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
-                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
-                    bestScore = matchType.score
-                    bestMatch = LyricsSearchResult(
+
+                if (matchType.score >= MatchType.VERY_LOW.score) {
+                    candidates += LyricsSearchResult(
                         provider = "qq",
                         songId = if (songIdNum != null) "$songMid::$songIdNum" else songMid,
                         title = songTitle,
                         artist = singerName,
                         confidence = matchEval.confidence,
                         matchType = matchEval.matchType
-                    )
+                    ) to matchType.score
                 }
             }
-            
-            if (bestMatch != null) {
-                Timber.i("Found QQ Music best match: ${bestMatch.title} - ${bestMatch.artist} (confidence: ${bestMatch.confidence}, match=${bestMatch.matchType})")
-            } else {
-                Timber.d("No qualifying QQ Music match found for: $keyword")
-            }
-            
-            bestMatch
+
+            // 返回得分最高的前三个
+            candidates.sortedByDescending { it.second }
+                .take(3)
+                .map { it.first }
         } catch (e: Exception) {
             Timber.e(e, "Error searching QQ Music")
-            null
+            emptyList()
         }
     }
     
@@ -398,7 +393,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 从网易云音乐搜索歌词
      */
-    suspend fun searchNetease(title: String, artist: String): LyricsSearchResult? {
+    suspend fun searchNetease(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
             Timber.d("Netease search starting for keyword: $keyword")
@@ -424,18 +419,17 @@ open class LyricsRepository(private val httpClient: HttpClient) {
 
             if (!response.status.isSuccess()) {
                 Timber.w("Netease search failed: ${response.status}")
-                return null
+                return emptyList()
             }
 
             val responseJson = Json.parseToJsonElement(response.body<String>()).jsonObject
             val code = responseJson["code"]?.jsonPrimitive?.intOrNull
-            if (code != null && code != 200) return null
+            if (code != null && code != 200) return emptyList()
 
             val songList = responseJson["result"]?.jsonObject?.get("songs")?.jsonArray
-            if (songList.isNullOrEmpty()) return null
+            if (songList.isNullOrEmpty()) return emptyList()
 
-            var bestMatch: LyricsSearchResult? = null
-            var bestScore = -1
+            val candidates = mutableListOf<Pair<LyricsSearchResult, Int>>()
 
             for (songElement in songList) {
                 val song = songElement.jsonObject
@@ -461,23 +455,24 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 )
                 val matchType = MatchType.valueOf(matchEval.matchType)
 
-                if (matchType.score >= MatchType.VERY_LOW.score && matchType.score > bestScore) {
-                    bestScore = matchType.score
-                    bestMatch = LyricsSearchResult(
+                if (matchType.score >= MatchType.VERY_LOW.score) {
+                    candidates += LyricsSearchResult(
                         provider = "netease",
                         songId = songId,
                         title = songTitle,
                         artist = singerName,
                         confidence = matchEval.confidence,
                         matchType = matchEval.matchType
-                    )
+                    ) to matchType.score
                 }
             }
 
-            bestMatch
+            candidates.sortedByDescending { it.second }
+                .take(3)
+                .map { it.first }
         } catch (e: Exception) {
             Timber.e(e, "Error searching Netease")
-            null
+            emptyList()
         }
     }
 
@@ -490,7 +485,7 @@ open class LyricsRepository(private val httpClient: HttpClient) {
      */
     suspend fun searchAMLL(title: String, artist: String): LyricsSearchResult? {
         return try {
-            val neteaseCandidate = searchNetease(title, artist) ?: return null
+            val neteaseCandidate = searchNetease(title, artist).firstOrNull() ?: return null
             // prefix with platform so that callers later know which path to hit
             val amllId = "ncm:${neteaseCandidate.songId}"
             val amllLyrics = getAMLL_TTMLLyrics(
@@ -635,11 +630,11 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 从酷狗音乐搜索歌词
      */
-    suspend fun searchKugou(title: String, artist: String): LyricsSearchResult? {
+    suspend fun searchKugou(title: String, artist: String): List<LyricsSearchResult> {
         return try {
             val keyword = "$title $artist".trim()
             Timber.d("Kugou search starting for keyword: $keyword")
-            
+
             // Step 1: 从 Kugou 搜歌曲获得哈希值（对齐 Unilyric）
             val searchResponse = httpClient.get("http://mobilecdn.kugou.com/api/v3/search/song") {
                 parameter("keyword", keyword)
@@ -647,33 +642,30 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 parameter("pagesize", "20")
                 parameter("showtype", "1")
             }
-            
+
             if (!searchResponse.status.isSuccess()) {
                 Timber.w("Kugou song search failed: ${searchResponse.status}")
-                return null
+                return emptyList()
             }
-            
+
             val json = Json { ignoreUnknownKeys = true }
             val searchBody = searchResponse.body<String>()
             Timber.d("Kugou search API raw response (first 2000 chars): ${searchBody.take(2000)}")
-            
+
             val searchJson = json.parseToJsonElement(searchBody).jsonObject
             val dataElement = searchJson["data"]?.jsonObject?.get("info")?.jsonArray
-            
+
             Timber.d("Kugou parsed data element: ${dataElement?.size} items")
-            
+
             if (dataElement.isNullOrEmpty()) {
                 Timber.w("No Kugou song results found for: $keyword")
-                return null
+                return emptyList()
             }
-            
-            // Step 2: 遍历候选歌曲，计算匹配度（不依赖歌词搜索是否成功）
-            // 歌词搜索在 getKugouLyrics 时会重新进行，这里只负责找到最匹配的歌曲
-            var bestMatch: LyricsSearchResult? = null
-            var bestScore = -1
-            
+
+            val candidates = mutableListOf<Pair<LyricsSearchResult, Int>>()
+
             Timber.d("Kugou found ${dataElement.size} song candidates, evaluating match...")
-            
+
             for ((index, songElement) in dataElement.withIndex()) {
                 val songObj = songElement.jsonObject
                 val songHash = songObj["hash"]?.jsonPrimitive?.content
@@ -681,18 +673,17 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 val singerName = songObj["singername"]?.jsonPrimitive?.content
                 val albumName = songObj["album_name"]?.jsonPrimitive?.content
                 val durationSec = songObj["duration"]?.jsonPrimitive?.longOrNull
-                
+
                 // 检查必要字段
                 if (songHash == null || songTitle == null || singerName == null || durationSec == null) {
                     Timber.d("Candidate #$index: Missing required fields (hash=$songHash, title=$songTitle, artist=$singerName, dur=$durationSec)")
                     continue
                 }
-                
+
                 val durationMs = durationSec * 1000
-                
+
                 Timber.d("Candidate #$index: $songTitle - $singerName (hash=$songHash, duration=${durationMs}ms)")
-                
-                // Step 3: 计算匹配度
+
                 val matchEval = evaluateMatch(
                     searchTitle = title,
                     searchArtist = artist,
@@ -702,38 +693,27 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     resultDurationMs = durationMs
                 )
                 val matchType = MatchType.valueOf(matchEval.matchType)
-                
+
                 Timber.d("  -> Evaluation: confidence=${matchEval.confidence}, match=${matchEval.matchType}(score=${matchType.score})")
-                
-                // 只考虑达到最低门槛的候选（VERY_LOW 以上）
-                if (matchType.score < MatchType.VERY_LOW.score) {
-                    Timber.d("  -> Score ${matchType.score} below threshold ${MatchType.VERY_LOW.score}, skipping")
-                } else if (matchType.score > bestScore) {
-                    bestScore = matchType.score
-                    bestMatch = LyricsSearchResult(
+
+                if (matchType.score >= MatchType.VERY_LOW.score) {
+                    candidates += LyricsSearchResult(
                         provider = "kugou",
                         songId = songHash,
                         title = songTitle,
                         artist = singerName,
                         confidence = matchEval.confidence,
                         matchType = matchEval.matchType
-                    )
-                    Timber.d("  -> New best match found!")
-                } else {
-                    Timber.d("  -> Score ${matchType.score} not better than best ${bestScore}, skipping")
+                    ) to matchType.score
                 }
             }
-            
-            if (bestMatch != null) {
-                Timber.i("Found Kugou best match: ${bestMatch.title} - ${bestMatch.artist} (hash: ${bestMatch.songId}, confidence: ${bestMatch.confidence})")
-            } else {
-                Timber.w("No qualifying Kugou match found for: $keyword (tried ${dataElement.size} candidates)")
-            }
-            
-            bestMatch
+
+            candidates.sortedByDescending { it.second }
+                .take(3)
+                .map { it.first }
         } catch (e: Exception) {
             Timber.e(e, "Error searching Kugou")
-            null
+            emptyList()
         }
     }
     
@@ -863,6 +843,9 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             .replace("acoustic version", "acoustic", ignoreCase = true)  // 语义简化
             .replace(Regex("feat\\.?|ft\\.?|featuring", RegexOption.IGNORE_CASE), "") // strip featured tags
             .replace(Regex("\\b(the|a|an)\\b", RegexOption.IGNORE_CASE), "") // drop leading articles
+            // eliminate spaces between Latin and Han to treat "G.E.M. 邓紫棋" same as "G.E.M.邓紫棋"
+            .replace(Regex("(?<=\\p{Latin})\\s+(?=\\p{IsHan})"), "")
+            .replace(Regex("(?<=\\p{IsHan})\\s+(?=\\p{Latin})"), "")
             .replace(Regex("\\s+"), " ")                 // 多个空格 -> 单个空格
             .trim()
         return s
@@ -963,16 +946,35 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     // version-related keywords that often indicate alternate mixes/edits/releases
     private fun extractVersionKeywords(s: String): Set<String> {
         val keywords = listOf(
-            "remix", "live", "dj", "version", "edit", "mix", "acoustic",
-            "instrumental", "radio", "extended", "album", "single", "deluxe",
-            "explicit", "bonus", "cover", "karaoke", "remastered", "rework",
-            "re-edit", "dub", "club", "unplugged", "piano", "strings",
-            "orchestral", "demo", "remaster"
+            // English terms
+            "remix", "live", "dj", "edit", "mix", "acoustic",
+            "instrumental", "extended", "karaoke", "remastered", "rework",
+            "re-edit", "unplugged", "piano", "strings",
+            "orchestral", "demo", "remaster",
+            // Chinese equivalents / additional keywords
+            "混音", "现场", "无伴奏", "广播", "卡拉OK", "纯音乐", "加长", "重混",
+            "重制", "改编", "重编辑", "不插电", "钢琴", "弦乐", "管弦乐", "演示", "重新制作"
         )
         val lower = s.lowercase()
 
         // start with any keyword that appears in the string
         val matches = keywords.filter { lower.contains(it) }.toMutableSet()
+
+        // extra: capture parenthesized segments that likely indicate a version
+        // marker, e.g. "(国语版)" or "(remix version)".  we only consider cases
+        // where the content ends with 版 or contains the word "version" to
+        // prevent false positives such as "(版面)".
+        val parenthesized = Regex("\\(([^)]+)\\)").findAll(lower)
+            .map { it.groupValues[1] }
+            .toList()
+        for (content in parenthesized) {
+            val likelyVersion = content.contains("version") || content.endsWith("版")
+            if (likelyVersion &&
+                !content.contains("album version") && !content.contains("single version") &&
+                !content.contains("专辑版本") && !content.contains("单曲版本")) {
+                matches.add(content)
+            }
+        }
 
         // exclude unhelpful combinations such as "album version" or "single version".
         // these phrases are very generic and should not influence matching, so remove
@@ -1497,14 +1499,61 @@ open class LyricsRepository(private val httpClient: HttpClient) {
 
         val qqMusicJob = launch {
             Timber.d("QQ Music search starting...")
-            val result = runCatching { searchQQMusic(title, artist) }.getOrNull()
-            Timber.d("QQ Music search completed: ${if (result != null) "found" else "null"}")
-            tryPublish(result)
+            val list = runCatching { searchQQMusic(title, artist) }.getOrNull() ?: emptyList()
+            Timber.d("QQ Music search completed: found ${list.size} items")
+            for (r in list) tryPublish(r)
 
-            // additionally probe AMLL DB using the QQ id if we found a candidate
-            if (result != null) {
-                val prefixId = "qq:${result.songId}"
-                Timber.d("Probing AMLL DB for QQ candidate: $prefixId")
+            // additionally probe AMLL DB using each QQ id if we found candidates
+            for (result in list) {
+                val rawId = result.songId
+                val segments = rawId.split("::")
+                var published = false
+                for (seg in segments) {
+                    if (seg.isBlank()) continue
+                    val prefixId = "qq:$seg"
+                    Timber.d("Probing AMLL DB for QQ candidate segment: $prefixId (raw=$rawId)")
+                    val amllResult = runCatching {
+                        getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
+                    }.getOrNull()
+                    if (amllResult != null) {
+                        val wrapped = result.copy(
+                            provider = "amll",
+                            songId = prefixId,
+                            title = amllResult.metadata.title.takeIf { it.isNotBlank() } ?: result.title,
+                            artist = amllResult.metadata.artist.takeIf { it.isNotBlank() } ?: result.artist,
+                            album = amllResult.metadata.album ?: result.album
+                        )
+                        Timber.d("QQ AMLL probe succeeded with segment '$seg', publishing amll result")
+                        tryPublish(wrapped)
+                        published = true
+                        break // stop after first successful match
+                    } else {
+                        Timber.d("QQ AMLL probe for segment '$seg' returned no data")
+                    }
+                }
+                if (!published) {
+                    Timber.d("QQ AMLL probe found no matching segments for rawId=$rawId")
+                }
+            }
+        }
+
+        val kugouJob = launch {
+            Timber.d("Kugou search starting...")
+            val list = runCatching { searchKugou(title, artist) }.getOrNull() ?: emptyList()
+            Timber.d("Kugou search completed: found ${list.size} items")
+            for (r in list) tryPublish(r)
+        }
+
+        val neteaseJob = launch {
+            Timber.d("Netease search starting...")
+            val list = runCatching { searchNetease(title, artist) }.getOrNull() ?: emptyList()
+            Timber.d("Netease search completed: found ${list.size} items")
+            for (r in list) tryPublish(r)
+
+            // additionally probe AMLL DB using each Netease id
+            for (result in list) {
+                val prefixId = "ncm:${result.songId}"
+                Timber.d("Probing AMLL DB for Netease candidate: $prefixId")
                 val amllResult = runCatching {
                     getAMLL_TTMLLyrics(prefixId, title = result.title, artist = result.artist)
                 }.getOrNull()?.let { lyrics ->
@@ -1517,26 +1566,12 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                     )
                 }
                 if (amllResult != null) {
-                    Timber.d("QQ AMLL probe succeeded, publishing amll result")
+                    Timber.d("Netease AMLL probe succeeded, publishing amll result")
                     tryPublish(amllResult)
                 } else {
-                    Timber.d("QQ AMLL probe returned no data")
+                    Timber.d("Netease AMLL probe returned no data")
                 }
             }
-        }
-
-        val kugouJob = launch {
-            Timber.d("Kugou search starting...")
-            val result = runCatching { searchKugou(title, artist) }.getOrNull()
-            Timber.d("Kugou search completed: ${if (result != null) "found (${result.title} - ${result.artist})" else "null"}")
-            tryPublish(result)
-        }
-
-        val neteaseJob = launch {
-            Timber.d("Netease search starting...")
-            val result = runCatching { searchNetease(title, artist) }.getOrNull()
-            Timber.d("Netease search completed: ${if (result != null) "found" else "null"}")
-            tryPublish(result)
         }
 
         amllJob.join()
@@ -1555,17 +1590,25 @@ open class LyricsRepository(private val httpClient: HttpClient) {
     /**
      * 智能获取歌词 - 自动搜索并选择最佳来源
      * 这是推荐的歌词获取方式,模仿 Unilyric 的工作流程
+     *
+     * 优先级说明：如果本地缓存（AMLL 数据库）包含候选歌词，会在
+     * 其他在线来源之前尝试返回该缓存结果。
+     *
+     * @param currentSourceName 可选的播放来源名称（例如播放器应用名）。
+     *   若传入且搜索候选在置信度/功能上完全相等，则有助于优先选择
+     *   与当前来源相关的结果（如网易、QQ、酷狗）。
      */
     suspend fun fetchLyricsAuto(
         title: String,
-        artist: String
+        artist: String,
+        currentSourceName: String? = null
     ): LyricsResult {
+        // simplified flow: search and immediately use the top candidate
+        // 新增: 如果本地缓存（AMLL）中已有候选，则优先尝试返回它，无论置信度如何。
         try {
             Timber.i("Auto-fetching lyrics for: $title - $artist")
-            
-            // 1. 先搜索所有来源
+
             var searchResults = searchLyrics(title, artist)
-            
             if (searchResults.isEmpty()) {
                 Timber.w("No search results found for: $title - $artist")
                 return LyricsResult(
@@ -1574,77 +1617,49 @@ open class LyricsRepository(private val httpClient: HttpClient) {
                 )
             }
 
-            // 1b. 如果多于一个候选，按照匹配度+特性重新排序
-            if (searchResults.size > 1) {
-                searchResults = adjustResultsForFeatures(searchResults)
-            }
-            
-            // 2. 先尝试 AMLL DB（只要有网易云候选就尝试，成功即优先使用）
-            val amllCandidates = searchResults
-                .filter { it.provider.equals("amll", ignoreCase = true) }
-                .sortedByDescending { it.confidence }
-
-            for (amllResult in amllCandidates) {
-                Timber.d("Trying AMLL TTML DB with candidate ID: ${amllResult.songId}")
-                val amllLyrics = getAMLL_TTMLLyrics(
-                    amllResult.songId,
-                    title = amllResult.title,
-                    artist = amllResult.artist
-                )
-                if (amllLyrics != null) {
-                    Timber.i("Successfully fetched from AMLL TTML DB")
-                    return LyricsResult(
-                        isSuccess = true,
-                        lyrics = amllLyrics,
-                        source = formatAutoSource(
-                            provider = "amll",
-                            title = amllResult.title,
-                            artist = amllResult.artist,
-                            songId = amllResult.songId
-                        )
-                    )
-                }
-            }
-
-            // 3. 按固定来源优先级尝试：酷狗 -> 网易云 -> QQ音乐
-            val providerPriority = listOf("kugou", "netease", "qq")
-            for (provider in providerPriority) {
-                val providerCandidates = searchResults
-                    .filter { it.provider.equals(provider, ignoreCase = true) }
-                    .sortedByDescending { it.confidence }
-
-                for (result in providerCandidates) {
-                    Timber.d("Trying $provider with ID: ${result.songId}")
-                    val lyrics = when (provider) {
-                        "kugou" -> getKugouLyrics(result.songId, result.title, result.artist)
-                        "netease" -> getNeteaseLyrics(result.songId, result.title, result.artist)
-                        "qq" -> getQQMusicLyrics(result.songId, result.title, result.artist)
-                        else -> null
-                    }
-
-                    if (lyrics != null) {
-                        Timber.i("Successfully fetched from $provider")
-                        return LyricsResult(
-                            isSuccess = true,
-                            lyrics = lyrics,
+            // 优先尝试本地缓存候选（provider=="amll").
+            val localCandidates = searchResults.filter { it.provider.equals("amll", ignoreCase = true) }
+            if (localCandidates.isNotEmpty()) {
+                // 按置信度降序遍历，成功则直接返回
+                for (candidate in localCandidates.sortedByDescending { it.confidence }) {
+                    Timber.d("尝试使用本地缓存候选: ${candidate.songId} conf=${candidate.confidence}")
+                    val cached = getLyrics(candidate.provider, candidate.songId, candidate.title, candidate.artist)
+                    if (cached.isSuccess) {
+                        return cached.copy(
                             source = formatAutoSource(
-                                provider = provider,
-                                title = result.title,
-                                artist = result.artist,
-                                songId = result.songId
+                                provider = candidate.provider,
+                                title = candidate.title,
+                                artist = candidate.artist,
+                                songId = candidate.songId
                             )
                         )
                     }
+                    Timber.w("本地缓存候选获取失败, 将尝试其它来源: id=${candidate.songId}")
                 }
+                // 如果所有本地候选都失败了，则继续走正常流程
             }
-            
-            // 4. 所有候选来源都失败
-            Timber.w("All sources failed for: $title - $artist")
-            return LyricsResult(
-                isSuccess = false,
-                errorMessage = "找到歌曲但无法获取歌词,可能该歌曲暂无歌词"
-            )
-            
+
+            if (searchResults.size > 1) {
+                searchResults = adjustResultsForFeatures(searchResults, currentSourceName)
+            }
+
+            val top = searchResults.first()
+            Timber.d("Selected top candidate after sorting: ${top.provider} id=${top.songId} conf=${top.confidence}")
+
+            // fetch using generic getter
+            val result = getLyrics(top.provider, top.songId, top.title, top.artist)
+            if (result.isSuccess) {
+                // ensure source matches previous "自动识别:" style
+                return result.copy(
+                    source = formatAutoSource(
+                        provider = top.provider,
+                        title = top.title,
+                        artist = top.artist,
+                        songId = top.songId
+                    )
+                )
+            }
+            return result
         } catch (e: Exception) {
             Timber.e(e, "Error in auto-fetch lyrics")
             return LyricsResult(
@@ -1734,8 +1749,20 @@ open class LyricsRepository(private val httpClient: HttpClient) {
      * 重新排序搜索结果，使匹配度相差不大的时功能多的靠前。
      * 这是一个独立的辅助手段，主要给 fetchLyricsAuto 和测试使用。
      */
+    /**
+     * 重新排序搜索结果，使匹配度相差不大的时功能多的靠前。
+     * 这是一个独立的辅助手段，主要给 fetchLyricsAuto 和测试使用。
+     *
+     * @param currentSourceName 可选的当前播放来源名称（如应用名）。
+     *   在候选置信度与功能完全相同时，如果该字符串包含特定关键词，
+     *   会按以下优先级调整：
+     *     - 包含“网易”时优先网易云
+     *     - 包含“QQ”时优先QQ音乐，其次酷狗
+     *     - 包含“酷狗”时优先酷狗，其次QQ音乐
+     */
     internal suspend fun adjustResultsForFeatures(
-        results: List<LyricsSearchResult>
+        results: List<LyricsSearchResult>,
+        currentSourceName: String? = null
     ): List<LyricsSearchResult> {
         if (results.size <= 1) return results
         val decorated = results.map { result ->
@@ -1747,7 +1774,28 @@ open class LyricsRepository(private val httpClient: HttpClient) {
             if (diff != 0f) {
                 -diff.compareTo(0f)
             } else {
-                b.second.size - a.second.size
+                // confidences tie
+                val featureDiff = b.second.size - a.second.size
+                if (featureDiff != 0) {
+                    featureDiff
+                } else if (!currentSourceName.isNullOrBlank()) {
+                    val lower = currentSourceName.lowercase()
+                    val priorityList = when {
+                        lower.contains("网易") -> listOf("netease")
+                        lower.contains("qq") -> listOf("qq", "kugou")
+                        lower.contains("酷狗") -> listOf("kugou", "qq")
+                        else -> emptyList()
+                    }
+                    if (priorityList.isNotEmpty()) {
+                        val aIndex = priorityList.indexOf(a.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                        val bIndex = priorityList.indexOf(b.first.provider.lowercase()).let { if (it < 0) Int.MAX_VALUE else it }
+                        aIndex.compareTo(bIndex)
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
             }
         }).map { it.first }
     }
