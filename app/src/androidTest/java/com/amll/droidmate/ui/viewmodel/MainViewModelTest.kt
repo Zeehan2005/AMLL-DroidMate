@@ -142,6 +142,7 @@ class MainViewModelTest {
         assertTrue(fakeManager.lastOngoing == true)
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
     fun fetchLyrics_packageNameBias() = runTest {
         val captured = mutableListOf<String?>()
