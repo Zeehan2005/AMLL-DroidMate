@@ -289,7 +289,7 @@ private fun CustomLyricsPage(
             OutlinedTextField(
                 value = manualText,
                 onValueChange = { manualText = it },
-                label = { Text("手动输入") },
+                label = { Text("长按以粘贴") },
                 placeholder = { Text("推荐TTML，也支持其他格式。") },
                 modifier = Modifier
                     .fillMaxWidth(),
