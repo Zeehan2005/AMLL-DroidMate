@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.DpSize
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -550,6 +551,7 @@ private fun LyricsVisualLayer(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingCard(
     nowPlaying: NowPlayingMusic?,
@@ -593,7 +595,28 @@ fun NowPlayingCard(
                 Spacer(Modifier.height(8.dp))
                 var sliderValue by remember(nowPlaying.currentPosition) { mutableStateOf(nowPlaying.currentPosition.toFloat()) }
                 Column {
-                    Slider(value = sliderValue, onValueChange = { sliderValue = it }, onValueChangeFinished = { onSeek(sliderValue.toLong()) }, valueRange = 0f..nowPlaying.duration.toFloat().coerceAtLeast(1f))
+                    // progress slider; thumb was previously very tall, so we shrink both
+                    // track and thumb size.
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { sliderValue = it },
+                        onValueChangeFinished = { onSeek(sliderValue.toLong()) },
+                        valueRange = 0f..nowPlaying.duration.toFloat().coerceAtLeast(1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(16.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                        ),
+                        thumb = {
+                            SliderDefaults.Thumb(
+                                interactionSource = remember { MutableInteractionSource() },
+                                enabled = true
+                            )
+                        }
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(sliderValue.toLong()), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         Text(formatTime(nowPlaying.duration), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
