@@ -72,6 +72,9 @@ dependencies {
     implementation("androidx.media:media:1.7.1")
     implementation("androidx.palette:palette:1.0.0")
 
+    // media3 UI gives us DefaultTimeBar and other player controls
+    implementation("androidx.media3:media3-ui:1.0.0")
+
     // Jetpack Compose (Version managed by BOM)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")

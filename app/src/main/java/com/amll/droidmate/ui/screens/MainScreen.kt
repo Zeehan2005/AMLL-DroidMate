@@ -48,6 +48,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -58,10 +59,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import androidx.media3.ui.DefaultTimeBar
+import androidx.media3.ui.TimeBar
 import com.amll.droidmate.R
+import com.amll.droidmate.domain.model.LyricLine
 import com.amll.droidmate.domain.model.NowPlayingMusic
 import com.amll.droidmate.domain.model.TTMLLyrics
 import com.amll.droidmate.ui.AppSettings
@@ -86,6 +91,26 @@ fun getAppNameFromPackage(context: Context, packageName: String?): String? {
     } catch (e: PackageManager.NameNotFoundException) {
         null
     }
+}
+
+// helpers moved here so they are visible to MainScreen early in the file
+private fun isNotificationAccessGranted(context: Context): Boolean =
+    Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")?.contains(context.packageName) == true
+
+@Composable
+private fun AdaptiveStatusBarStyle(useDarkIcons: Boolean) {
+    val view = LocalView.current
+    SideEffect {
+        val activity = view.context.findActivity() ?: return@SideEffect
+        WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = useDarkIcons
+    }
+}
+
+// used by AdaptiveStatusBarStyle
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -144,7 +169,7 @@ fun MainScreen() {
         }
     }
 
-    // 核心改进：当且仅当 [非切歌期] 且 [无歌词显示文案] 时，退回主界面。切歌时禁止退出。
+    // 智能退出逻辑：非加载期且无歌词时，延迟退回
     LaunchedEffect(lyrics, isLoading) {
         if (!isLoading && lyrics == null && isLyricsFullscreen) {
             delay(1500)
@@ -226,6 +251,24 @@ fun MainScreen() {
                 )
             }
 
+            if (showOpenAppDialog) {
+                val sourceAppName = getAppNameFromPackage(context, nowPlaying?.packageName) ?: "播放源应用"
+                AlertDialog(
+                    onDismissRequest = { showOpenAppDialog = false },
+                    title = { Text("打开 $sourceAppName？") },
+                    text = { Text("您可进入设置调整点击卡片的默认行为。") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            openSourceApp(context, nowPlaying?.packageName)
+                            showOpenAppDialog = false
+                        }) { Text("打开") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showOpenAppDialog = false }) { Text("忽略") }
+                    }
+                )
+            }
+
             if (showAutoUpdateDialog) {
                 AlertDialog(
                     onDismissRequest = { showAutoUpdateDialog = false },
@@ -271,6 +314,7 @@ fun MainScreen() {
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        // 占位提示：恢复消失的文案
                         if (currentLyrics == null && !spinnerVisible) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -278,7 +322,7 @@ fun MainScreen() {
                                     color = Color.White.copy(alpha = 0.8f),
                                     fontSize = 16.sp,
                                     textAlign = TextAlign.Center,
-                                    modifier = Modifier.background(Color.Black.copy(0.3f), RoundedCornerShape(8.dp)).padding(12.dp)
+                                    modifier = Modifier.background(Color.Black.copy(0.35f), RoundedCornerShape(8.dp)).padding(12.dp)
                                 )
                             }
                         }
@@ -336,7 +380,7 @@ fun MainScreen() {
             }
         }
 
-        // 全屏显示：保留原有沉浸式逻辑并优化按钮间距
+        // 全屏显示：恢复原有精细逻辑
         AnimatedVisibility(
             visible = isLyricsFullscreen && (lyrics != null || spinnerVisible),
             enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.96f),
@@ -421,32 +465,11 @@ fun MainScreen() {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出全屏", tint = Color.White.copy(alpha = 0.9f))
                 }
 
-                if (showMatchBubble) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 88.dp, start = 16.dp, end = 16.dp).alpha(controlsAlpha)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f), shape = RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(text = "正在匹配更优歌词", color = MaterialTheme.colorScheme.onPrimary, fontSize = 14.sp)
-                        Button(
-                            onClick = {
-                                val intent = Intent(context, CustomLyricsActivity::class.java).apply {
-                                    putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: ""); putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
-                                }
-                                customLyricsLauncher.launch(intent)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                        ) { Text("自选歌词", fontSize = 14.sp) }
-                    }
-                }
-
                 nowPlaying?.let { currentPlaying ->
                     Row(
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 64.dp, start = 32.dp, end = 32.dp).height(100.dp).alpha(controlsAlpha),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceAround // 优化：平衡按钮间距
+                        horizontalArrangement = Arrangement.SpaceAround // 平衡按钮间距
                     ) {
                         val leftInteractionSource = remember { MutableInteractionSource() }
                         Box(
@@ -504,20 +527,6 @@ fun MainScreen() {
     }
 }
 
-@Composable
-private fun AdaptiveStatusBarStyle(useDarkIcons: Boolean) {
-    val view = LocalView.current
-    SideEffect {
-        val activity = view.context.findActivity() ?: return@SideEffect
-        WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = useDarkIcons
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
 
 @Composable
 private fun LyricsVisualLayer(
@@ -564,7 +573,7 @@ fun NowPlayingCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AsyncImage(model = nowPlaying.albumArtUri, contentDescription = null, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
                     Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                         val appName = nowPlaying.packageName?.let { getAppNameFromPackage(context, it) }
                         Text(appName ?: "播放源应用", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), lineHeight = 12.sp)
                         Text(nowPlaying.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
@@ -572,11 +581,48 @@ fun NowPlayingCard(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                var sliderValue by remember(nowPlaying.currentPosition) { mutableStateOf(nowPlaying.currentPosition.toFloat()) }
+
+                // switch to Media3's DefaultTimeBar for a true player-style timeline
+                // we don't have a real Player object here, so drive the bar manually
                 Column {
-                    Slider(value = sliderValue, onValueChange = { sliderValue = it }, onValueChangeFinished = { onSeek(sliderValue.toLong()) }, valueRange = 0f..nowPlaying.duration.toFloat().coerceAtLeast(1f))
+                    var timeBarRef by remember { mutableStateOf<androidx.media3.ui.DefaultTimeBar?>(null) }
+
+                    // precompute theme colors in ARGB since the AndroidView is not a composable
+                    val playedColor = MaterialTheme.colorScheme.primary.toArgb()
+                    val unplayedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f).toArgb()
+
+                    AndroidView(
+                        factory = { ctx ->
+                            androidx.media3.ui.DefaultTimeBar(ctx).apply {
+                                // make the bar thin and the scrubber small to match system media controls
+                                // (DefaultTimeBar in this version doesn't expose setters for height,
+                                // they must be styled via XML attributes or left at defaults.)
+                                val density = ctx.resources.displayMetrics.density
+                                // height customization skipped; keep default sizes
+                                setPlayedColor(playedColor)
+                                setUnplayedColor(unplayedColor)
+
+                                addListener(object : androidx.media3.ui.TimeBar.OnScrubListener {
+                                    override fun onScrubStart(timeBar: androidx.media3.ui.TimeBar, position: Long) {}
+                                    override fun onScrubMove(timeBar: androidx.media3.ui.TimeBar, position: Long) {}
+                                    override fun onScrubStop(timeBar: androidx.media3.ui.TimeBar, position: Long, canceled: Boolean) {
+                                        onSeek(position)
+                                    }
+                                })
+                                timeBarRef = this
+                            }
+                        },
+                        update = { view ->
+                            val duration = nowPlaying.duration
+                            view.setDuration(duration)
+                            view.setPosition(nowPlaying.currentPosition)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(24.dp)
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(sliderValue.toLong()), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        Text(formatTime(nowPlaying.currentPosition), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         Text(formatTime(nowPlaying.duration), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     }
                 }
@@ -633,9 +679,6 @@ fun PermissionStatusCard(notificationAccessGranted: Boolean, onOpenNotificationA
         }
     }
 }
-
-private fun isNotificationAccessGranted(context: Context): Boolean = 
-    Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")?.contains(context.packageName) == true
 
 private fun openSourceApp(context: Context, packageName: String?): Boolean {
     if (packageName.isNullOrBlank()) return false
