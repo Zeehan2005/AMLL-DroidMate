@@ -7,6 +7,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 val buildTimestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
@@ -46,10 +47,7 @@ android {
     buildFeatures {
         compose = true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
-    }
-    
+
     lint {
         disable += listOf("FullBackupContent", "NetworkSecurityConfig")
     }
