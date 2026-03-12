@@ -9,7 +9,10 @@ const DYNAMIC_FONT_STYLE_ID = 'amll-dynamic-font-face-style'
 
 const QUALITY_PROFILE = {
   alignAnchor: 'center',
-  alignPosition: 0.35,
+  // active line will land at 40% of the viewport from top of the *visible area*
+  // we introduce a half-screen padding above the first line, so the
+  // effective offset needs to be reduced by that amount (40% - 50% = -10%).
+  alignPosition: -0.1,
   enableSpring: true,
   enableScale: true,
   enableBlur: true,
@@ -45,6 +48,18 @@ const DEFAULT_BG_PROFILE = {
 }
 
 const TOUCH_BG_BLUR_CLASS = 'amll-touch-unblur'
+
+// helper for inserting a small stylesheet so that an individual lyric line
+// can be marked with `amll-line-unblur` and the rule will remove any
+// blur filter the core library may have applied.
+const UNBLUR_STYLE_ID = 'amll-unblur-style'
+function ensureUnblurStyle() {
+  if (document.getElementById(UNBLUR_STYLE_ID)) return
+  const s = document.createElement('style')
+  s.id = UNBLUR_STYLE_ID
+  s.textContent = `[class*="_lyricLine_"] .amll-line-unblur, [class*="_lyricLine_"].amll-line-unblur { filter: none !important; }`
+  document.head.appendChild(s)
+}
 
 function logToAndroid(message) {
   if (typeof Android !== 'undefined' && Android?.log) {
@@ -190,6 +205,21 @@ let currentBackgroundProfile = { ...DEFAULT_BG_PROFILE }
 let lastIncomingTime = null
 let seekUntilTs = 0
 
+// mirror important state on window so callbacks in the bundle can access them
+window.__amll = window.__amll || {}
+Object.assign(window.__amll, {
+  get player() { return player }, set player(v) { player = v },
+  get rafId() { return rafId }, set rafId(v) { rafId = v },
+  get lastFrameTime() { return lastFrameTime }, set lastFrameTime(v) { lastFrameTime = v },
+  get backgroundRender() { return backgroundRender }, set backgroundRender(v) { backgroundRender = v },
+  get lastAlbumArt() { return lastAlbumArt }, set lastAlbumArt(v) { lastAlbumArt = v },
+  get currentProfile() { return currentProfile }, set currentProfile(v) { currentProfile = v },
+  get currentBackgroundProfile() { return currentBackgroundProfile }, set currentBackgroundProfile(v) { currentBackgroundProfile = v },
+  get state() { return state }, set state(v) { state = v }
+})
+
+function amllGet(name){return window.__amll[name]}
+
 function callBackground(methodName, ...args) {
   if (!backgroundRender || typeof backgroundRender[methodName] !== 'function') return
   backgroundRender[methodName](...args)
@@ -224,12 +254,15 @@ function rebuildBackgroundRender() {
 
   backgroundRender = BackgroundRender.new(getBackgroundRendererCtor(currentBackgroundProfile.renderer))
   const bgElement = backgroundRender.getElement()
-  bgElement.style.position = 'absolute'
-  bgElement.style.inset = '0'
-  bgElement.style.width = '100%'
-  bgElement.style.height = '100%'
+  // keep the animated flow fixed to the viewport so it never scrolls
+  bgElement.style.position = 'fixed'
+  bgElement.style.top = '0'
+  bgElement.style.left = '0'
+  bgElement.style.width = '100vw'
+  bgElement.style.height = '100vh'
   bgElement.style.zIndex = '0'
-  app.prepend(bgElement)
+  // prepend to body so it sits behind everything
+  document.body.prepend(bgElement)
 
   applyBackgroundProfile(currentBackgroundProfile)
   if (lastAlbumArt) {
@@ -244,6 +277,7 @@ function callPlayer(methodName, ...args) {
 
 function applyMotionProfile(profile) {
   currentProfile = { ...profile }
+  if (window.__amll) window.__amll.currentProfile = currentProfile
   callPlayer('setAlignAnchor', currentProfile.alignAnchor)
   callPlayer('setAlignPosition', currentProfile.alignPosition)
   callPlayer('setEnableSpring', currentProfile.enableSpring)
@@ -268,15 +302,17 @@ function resetBlurTimeout() {
       state.blur.enabled = true
       player.getElement?.().classList.remove(TOUCH_BG_BLUR_CLASS)
       logToAndroid('[AMLL-BLUR] Blur restored after 5s inactivity')
+      document.querySelectorAll('.amll-line-unblur').forEach(el => el.classList.remove('amll-line-unblur'))
     }
     state.blur.timeoutId = null
   }, state.blur.TIMEOUT_MS)
 }
 
-function handleTouchStart() {
+function handleTouchStart(e) {
   // 记录触摸位置和时间
-  state.touch.startX = event?.touches?.[0]?.clientX ?? 0
-  state.touch.startY = event?.touches?.[0]?.clientY ?? 0
+  const touch = e?.touches?.[0]
+  state.touch.startX = touch?.clientX ?? 0
+  state.touch.startY = touch?.clientY ?? 0
   state.touch.startTime = Date.now()
   state.touch.isMoved = false
 
@@ -287,6 +323,17 @@ function handleTouchStart() {
     player.getElement?.().classList.add(TOUCH_BG_BLUR_CLASS)
     logToAndroid('[AMLL-BLUR] Blur disabled on touch, keep BG blurred')
   }
+
+  // unblur the line under the finger
+  try {
+    const x = touch?.clientX ?? state.touch.startX
+    const y = touch?.clientY ?? state.touch.startY
+    const el = document.elementFromPoint(x, y)
+    const lineEl = el?.closest ? el.closest('[class*="_lyricLine_"]') : null
+    if (lineEl) {
+      lineEl.classList.add('amll-line-unblur')
+    }
+  } catch (_ignored) {}
 
   resetBlurTimeout()
 }
@@ -347,6 +394,9 @@ function handleTouchEnd(e) {
     }
   }
 
+  // cleanup unblur classes
+  document.querySelectorAll('.amll-line-unblur').forEach(el => el.classList.remove('amll-line-unblur'))
+
   resetBlurTimeout()
 }
 
@@ -380,9 +430,11 @@ function settleSeekingIfNeeded(now) {
 
 function applyPlayerStyle(element) {
   element.style.width = '100%'
-  element.style.height = '100%'
+  element.style.height = 'auto' // let height grow so document scrolling works
   element.style.background = PLAYER_BACKGROUND
-  element.style.mixBlendMode = 'plus-lighter'
+  // remove blending; plus-lighter can make white text disappear on bright or
+  // similarly colored backgrounds. plain rendering ensures visibility.
+  element.style.mixBlendMode = 'normal'
   element.style.color = '#f5f7ff'
   element.style.setProperty('--amll-lp-font-family', `var(--amll-user-font-family, ${DEFAULT_FONT_STACK})`)
   element.style.fontFamily = 'var(--amll-lp-font-family)'
@@ -473,6 +525,13 @@ function mountPlayer() {
     return
   }
 
+  // ensure the CSS rule for unblurring a single line is present
+  ensureUnblurStyle()
+
+  // make the outer document scrollable
+  document.documentElement.style.overflowY = 'auto'
+  document.body.style.overflowY = 'auto'
+
   app.innerHTML = ''
   app.style.background = PLAYER_BACKGROUND
 
@@ -483,10 +542,61 @@ function mountPlayer() {
     rebuildBackgroundRender()
 
     player = new LyricPlayer()
+
+    // patch setLyricLines so we always keep all lines buffered
+    const originalSetLyricLines = player.setLyricLines.bind(player)
+    player.setLyricLines = function (lines, time = 0) {
+      originalSetLyricLines(lines, time)
+      if (this.bufferedLines) {
+        this.bufferedLines.clear()
+        for (let i = 0; i < lines.length; i++) {
+          this.bufferedLines.add(i)
+        }
+        this.scrollToIndex = 0
+        this.calcLayout(true)
+      }
+    }
+
+    // web-flow layout patch
+    player.allowScroll = false
+    const originalCalcLayout = player.calcLayout.bind(player)
+    // keep track of padding we have already applied so we don't repeatedly
+    // add the same amount on each layout pass (which previously caused the
+    // container height to grow to 50k+ after a few frames).
+    // track the previous padding so the added height doesn't accumulate
+    let __lastPadding = 0
+    player.calcLayout = async function (animated = false) {
+      await originalCalcLayout(animated)
+
+      // add top/bottom padding equal to half the viewport height
+      const pad = this.size[1] * 0.5
+      if (this.element) {
+        this.element.style.boxSizing = 'border-box'
+        this.element.style.paddingTop = pad + 'px'
+        this.element.style.paddingBottom = pad + 'px'
+
+        // measure the height produced by original layout and strip off the
+        // previous padding to obtain the true content height.
+        const computedHeight = parseFloat(this.element.style.height) || this.element.clientHeight || 0
+        const baseHeight = Math.max(0, computedHeight - __lastPadding * 2)
+        this.element.style.height = baseHeight + pad * 2 + 'px'
+
+        // shift the bottom line accordingly
+        this.bottomLine.setTransform(0, baseHeight + pad, false, 0)
+      }
+
+      __lastPadding = pad
+    }
+
     const playerElement = player.getElement()
     applyPlayerStyle(playerElement)
-    playerElement.style.position = 'absolute'
-    playerElement.style.inset = '0'
+    if (player.allowScroll) {
+      playerElement.style.position = 'absolute'
+      playerElement.style.inset = '0'
+    } else {
+      playerElement.style.position = 'relative'
+      playerElement.style.inset = 'auto'
+    }
     playerElement.style.zIndex = '1'
     app.appendChild(playerElement)
 
@@ -552,6 +662,7 @@ window.setRenderMode = function (mode) {
     return
   }
 
+  // always use fresh quality profile, not relying on possibly undefined currentProfile
   applyMotionProfile(QUALITY_PROFILE)
   logToAndroid(`[AMLL-CALL] setRenderMode(${mode}) -> quality profile applied`)
 }
@@ -570,6 +681,15 @@ window.updateLyrics = function (lyricsPayload) {
     }
     
     state.lyricLines = normalizeLyricLines(rawLines)
+
+    // debug dump first few lines to help diagnose visibility issues
+    if (state.lyricLines.length > 0) {
+      state.lyricLines.slice(0, 5).forEach((ln, idx) => {
+        logToAndroid(`[AMLL-DUMP] normalized line ${idx}: text="${ln.words.map(w=>w.word).join('')}" isBG=${ln.isBG} isDuet=${ln.isDuet}`)
+      })
+    } else {
+      logToAndroid('[AMLL-DUMP] no lyric lines after normalization')
+    }
 
     if (player) {
       const currentTimeToUse = Math.trunc(state.currentTime)
@@ -675,18 +795,20 @@ window.updateLowFreqVolume = function (value) {
 window.configureBackgroundEffect = function (options) {
   if (!options || typeof options !== 'object') return
 
+  const base = amllGet('currentBackgroundProfile') || currentBackgroundProfile
   const next = {
-    ...currentBackgroundProfile,
+    ...base,
     ...options,
   }
   if (typeof next.renderer === 'string') {
     next.renderer = next.renderer.toLowerCase() === 'mesh' ? 'mesh' : 'pixi'
   } else {
-    next.renderer = currentBackgroundProfile.renderer
+    next.renderer = base.renderer
   }
 
-  const rendererChanged = next.renderer !== currentBackgroundProfile.renderer
+  const rendererChanged = next.renderer !== base.renderer
   currentBackgroundProfile = next
+  if (window.__amll) window.__amll.currentBackgroundProfile = next
 
   if (rendererChanged) {
     rebuildBackgroundRender()

@@ -23,6 +23,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -38,8 +39,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TextSnippet
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.ripple
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -65,6 +68,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.amll.droidmate.R
 import com.amll.droidmate.domain.model.LyricLine
+import com.amll.droidmate.ui.theme.AlbumColorExtractor
 import com.amll.droidmate.domain.model.NowPlayingMusic
 import com.amll.droidmate.domain.model.TTMLLyrics
 import com.amll.droidmate.ui.AppSettings
@@ -95,6 +99,9 @@ fun getAppNameFromPackage(context: Context, packageName: String?): String? {
 private fun isNotificationAccessGranted(context: Context): Boolean =
     Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")?.contains(context.packageName) == true
 
+// simple contrast chooser: white text on dark backgrounds, black on light
+private fun Color.contrastAgainst(): Color = if (luminance() > 0.5f) Color.Black else Color.White
+
 @Composable
 private fun AdaptiveStatusBarStyle(useDarkIcons: Boolean) {
     val view = LocalView.current
@@ -116,11 +123,34 @@ fun MainScreen() {
     val context = LocalContext.current
     val viewModel: MainViewModel = viewModel()
     val nowPlaying by viewModel.nowPlayingMusic.collectAsState()
+    val isDarkTheme = isSystemInDarkTheme()
+    // rippleColor tracks album-art-based primary color; falls back to theme primary if extraction fails
+    val initialPrimary = MaterialTheme.colorScheme.primary
+    val rippleColor = remember { mutableStateOf(initialPrimary) }
+    // derived background color used by both now playing card and dropdown menu
+    // always use the darker alpha so light mode matches dark mode
+    val cardBg = rippleColor.value.copy(alpha = 0.3f)
     val lyrics by viewModel.lyrics.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val currentTime = nowPlaying?.currentPosition ?: 0L
     var notificationAccessGranted by remember { mutableStateOf(isNotificationAccessGranted(context)) }
+
+    // update ripple color whenever album art changes or theme toggles
+    // use initialPrimary rather than recomputing MaterialTheme inside the coroutine
+    LaunchedEffect(nowPlaying?.albumArtUri, isDarkTheme) {
+        val uri = nowPlaying?.albumArtUri
+        if (!uri.isNullOrBlank()) {
+            try {
+                val colors = AlbumColorExtractor.extractColorsFromAlbumArt(context, uri, isDarkTheme)
+                rippleColor.value = colors?.primary ?: initialPrimary
+            } catch (_: Exception) {
+                rippleColor.value = initialPrimary
+            }
+        } else {
+            rippleColor.value = initialPrimary
+        }
+    }
     var isLyricsFullscreen by remember { mutableStateOf(false) }
     
     val fullscreenOverlayAlpha by animateFloatAsState(
@@ -212,30 +242,50 @@ fun MainScreen() {
                 ) {
                     Text(text = stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Box {
-                        IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "菜单") }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.TextSnippet, contentDescription = null) },
-                                text = { Text("自选歌词") },
-                                onClick = {
-                                    val intent = Intent(context, CustomLyricsActivity::class.java).apply {
-                                        putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
-                                        putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                        // introduce single interaction source so modifier and IconButton share it
+                        val menuInteractionSource = remember { MutableInteractionSource() }
+                        IconButton(
+                            onClick = { showMenu = true },
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                            interactionSource = menuInteractionSource,
+                            modifier = Modifier.indication(
+                                menuInteractionSource,
+                                ripple(color = rippleColor.value)
+                            )
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "菜单")
+                        }
+                        // background matching cardBg so both elements follow album color
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(cardBg)
+                        ) {
+                            // text/icons use onSurface same as the card
+                            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.TextSnippet, contentDescription = null) },
+                                    text = { Text("自选歌词") },
+                                    onClick = {
+                                        val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                            putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                            putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                        }
+                                        customLyricsLauncher.launch(intent)
+                                        showMenu = false
                                     }
-                                    customLyricsLauncher.launch(intent)
-                                    showMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                text = { Text("刷新") },
-                                onClick = { viewModel.fetchLyrics(); webViewReloadKey++; showMenu = false }
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                text = { Text("设置") },
-                                onClick = { context.startActivity(Intent(context, com.amll.droidmate.ui.SettingsActivity::class.java)); showMenu = false }
-                            )
+                                )
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    text = { Text("刷新") },
+                                    onClick = { viewModel.fetchLyrics(); webViewReloadKey++; showMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                    text = { Text("设置") },
+                                    onClick = { context.startActivity(Intent(context, com.amll.droidmate.ui.SettingsActivity::class.java)); showMenu = false }
+                                )
+                            }
                         }
                     }
                 }
@@ -290,7 +340,14 @@ fun MainScreen() {
             val currentLyrics = lyrics
             val shouldShowSpinner = isLoading
             LaunchedEffect(shouldShowSpinner) {
-                if (shouldShowSpinner) spinnerVisible = true else { delay(250); spinnerVisible = false }
+                if (shouldShowSpinner) {
+                    // wait a short time before actually showing the spinner; if loading
+                    // finishes quickly the mask never appears
+                    delay(300)
+                    if (shouldShowSpinner) spinnerVisible = true
+                } else {
+                    spinnerVisible = false
+                }
             }
 
             if (!isLyricsFullscreen) {
@@ -302,7 +359,7 @@ fun MainScreen() {
                     Box(modifier = Modifier.fillMaxSize()) {
                         LyricsVisualLayer(
                             nowPlaying = nowPlaying,
-                            lyrics = currentLyrics ?: TTMLLyrics(com.amll.droidmate.domain.model.TTMLMetadata("", "", null, "ja", 0L, "DroidMate"), emptyList()),
+                            lyrics = currentLyrics,
                             currentTime = currentTime,
                             webViewReloadKey = webViewReloadKey,
                             onLineSeek = { viewModel.seekTo(it) },
@@ -373,6 +430,8 @@ fun MainScreen() {
                             else -> {}
                         }
                     },
+                    cardBg = cardBg,
+                    sliderColor = rippleColor.value,
                     modifier = Modifier.fillMaxWidth().padding(16.dp)
                 )
             }
@@ -441,11 +500,10 @@ fun MainScreen() {
                         }
                     }
             ) {
-                val displayFulllyrics = lyrics ?: TTMLLyrics(com.amll.droidmate.domain.model.TTMLMetadata("", "", null, "ja", 0L, "DroidMate"), emptyList())
                 Card(modifier = Modifier.fillMaxSize(), shape = RoundedCornerShape(0.dp), colors = CardDefaults.cardColors(containerColor = Color.Black)) {
                     LyricsVisualLayer(
                         nowPlaying = nowPlaying,
-                        lyrics = displayFulllyrics,
+                        lyrics = lyrics,
                         currentTime = currentTime,
                         webViewReloadKey = webViewReloadKey,
                         onLineSeek = { viewModel.seekTo(it); resetHideTimer() },
@@ -529,7 +587,7 @@ fun MainScreen() {
 @Composable
 private fun LyricsVisualLayer(
     nowPlaying: NowPlayingMusic?,
-    lyrics: TTMLLyrics,
+    lyrics: TTMLLyrics?,
     currentTime: Long,
     webViewReloadKey: Int,
     onLineSeek: (Long) -> Unit,
@@ -542,8 +600,11 @@ private fun LyricsVisualLayer(
             AsyncImage(model = nowPlaying.albumArtUri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp).alpha(0.55f))
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(0.28f), Color.Black.copy(0.55f), Color.Black.copy(0.68f)))))
-        androidx.compose.runtime.key(webViewReloadKey, amllDebugSource) {
-            AMLLLyricsView(lyrics = lyrics, currentTime = currentTime, albumArtUri = nowPlaying?.albumArtUri, renderMode = AMLLRenderMode.DOM, debugSource = amllDebugSource, onLineSeek = onLineSeek, modifier = Modifier.fillMaxSize())
+        // only create the WebView if we actually have lyrics; avoids unnecessary page loads
+        if (lyrics != null) {
+            androidx.compose.runtime.key(webViewReloadKey, amllDebugSource) {
+                AMLLLyricsView(lyrics = lyrics, currentTime = currentTime, albumArtUri = nowPlaying?.albumArtUri, renderMode = AMLLRenderMode.DOM, debugSource = amllDebugSource, onLineSeek = onLineSeek, modifier = Modifier.fillMaxSize())
+            }
         }
         if (onFullscreenTap != null) {
             Box(Modifier.fillMaxSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onFullscreenTap() })
@@ -563,21 +624,21 @@ fun NowPlayingCard(
     onFastForward: () -> Unit,
     onSeek: (Long) -> Unit,
     onCardClick: () -> Unit,
+    // new parameter: background color for card (should match dropdown)
+    cardBg: Color = MaterialTheme.colorScheme.primaryContainer,
+    // slider/thumb color (pass rippleColor from caller)
+    sliderColor: Color = MaterialTheme.colorScheme.primary,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    // use a more noticeable background derived from the dynamic theme (primaryContainer)
-    // the default `surface` color often stays neutral/white, which gave the impression that the
-    // card wasn't changing when the album art changed. switching to a container color that is
-    // tinted by the extracted primary color makes the card follow the cover art.
-    // dark-mode tonal overlay was creating a darker rim around the card.  the
-    // Compose API doesn’t expose a `tonalElevation` parameter on cardColors, so
-    // we simply set elevation to 0; no shadow is used either, as requested.
+    // card background is provided by caller (computed in MainScreen)
     Card(
         modifier = modifier.clickable { onCardClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
+            containerColor = cardBg,
+            // content stays onSurface for legibility as before
+            contentColor = MaterialTheme.colorScheme.onSurface
         )
     ) {
         if (nowPlaying != null) {
@@ -588,11 +649,20 @@ fun NowPlayingCard(
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                         val appName = nowPlaying.packageName?.let { getAppNameFromPackage(context, it) }
                         Text(appName ?: "播放源应用", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), lineHeight = 12.sp)
-                        Text(nowPlaying.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                        Text(
+                            nowPlaying.title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                         Text(nowPlaying.artist, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                // add a bit more breathing room between the track info and slider
+                Spacer(Modifier.height(16.dp))
                 var sliderValue by remember(nowPlaying.currentPosition) { mutableStateOf(nowPlaying.currentPosition.toFloat()) }
                 Column {
                     // progress slider; thumb was previously very tall, so we shrink both
@@ -606,9 +676,9 @@ fun NowPlayingCard(
                             .fillMaxWidth()
                             .height(16.dp),
                         colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            thumbColor = sliderColor,
+                            activeTrackColor = sliderColor,
+                            inactiveTrackColor = sliderColor.copy(alpha = 0.3f)
                         ),
                         thumb = {
                             SliderDefaults.Thumb(
@@ -639,9 +709,14 @@ fun NowPlayingCard(
                                 )
                             },
                         contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.FastRewind, null, modifier = Modifier.size(28.dp)) }
+                    ) { Icon(Icons.Default.FastRewind, contentDescription = null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface) }
                     Box(modifier = Modifier.weight(1.5f).fillMaxHeight().clip(RoundedCornerShape(50)).clickable { onPlayPauseClick() }, contentAlignment = Alignment.Center) {
-                        Icon(if (nowPlaying.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, modifier = Modifier.size(40.dp))
+                        Icon(
+                            if (nowPlaying.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                     val rightInteractionSource = remember { MutableInteractionSource() }
                     Box(
@@ -659,7 +734,7 @@ fun NowPlayingCard(
                                 )
                             },
                         contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.FastForward, null, modifier = Modifier.size(28.dp)) }
+                    ) { Icon(Icons.Default.FastForward, contentDescription = null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface) }
                 }
             }
         }

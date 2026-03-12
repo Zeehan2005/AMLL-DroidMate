@@ -12,7 +12,8 @@ const DYNAMIC_FONT_STYLE_ID = 'amll-dynamic-font-face-style'
 
 const QUALITY_PROFILE = {
   alignAnchor: 'center',
-  alignPosition: 0.35,
+  // see comments in main.js: compensate for half‑screen blank area
+  alignPosition: -0.1,
   enableSpring: true,
   enableScale: true,
   enableBlur: true,
@@ -49,96 +50,8 @@ const DEFAULT_BG_PROFILE = {
 
 const TOUCH_BG_BLUR_CLASS = 'amll-touch-unblur'
 
-function logToAndroid(message) {
-  if (typeof Android !== 'undefined' && Android?.log) {
-    Android.log(message)
-  }
-}
-
-function stripLeadingBgBracket(text) {
-  return String(text ?? '').replace(/^\s*[\(（]\s*/, '')
-}
-
-function stripTrailingBgBracket(text) {
-  return String(text ?? '').replace(/\s*[\)）]\s*$/, '')
-}
-
-// --- new simple search UI component ---
-function SearchApp() {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [offset, setOffset] = useState(0)
-
-  const performSearch = async () => {
-    // placeholder: in real app call backend API
-    const dummy = [
-      `Result ${offset + 1}`,
-      `Result ${offset + 2}`,
-      `Result ${offset + 3}`,
-    ]
-    setResults((r) => [...r, ...dummy])
-    setOffset(offset + 3)
-  }
-
-  return (
-    <div style={{ padding: 20 }}>
-      <h1>歌词搜索示例</h1>
-      <input
-        type="text"
-        placeholder="输入关键词"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <button onClick={() => { setResults([]); setOffset(0); performSearch(); }}>
-        搜索
-      </button>
-      <ul>
-        {results.map((r, idx) => (
-          <li key={idx}>{r}</li>
-        ))}
-      </ul>
-      {results.length > 0 && (
-        <button onClick={performSearch}>更多结果</button>
-      )}
-    </div>
-  )
-}
-
-// render search UI
-ReactDOM.render(<SearchApp />, document.body)
-
-// rest of original lyrics/player helpers remain below (omitted here for brevity)
-function normalizeLyricLines(lines) {
-  if (!Array.isArray(lines)) return []
-
-  return lines.map((line) => {
-    const words = toWordEntries(line)
-    const wordStart = words.length > 0 ? words[0].startTime : Number(line?.startTime ?? 0)
-    const wordEnd = words.length > 0 ? words[words.length - 1].endTime : Number(line?.endTime ?? wordStart)
-    const startTime = Number(line?.startTime ?? wordStart)
-    const endTime = Number(line?.endTime ?? wordEnd)
-
-    const result = {
-      words,
-      translatedLyric: String(line?.translatedLyric ?? ''),
-      romanLyric: String(line?.romanLyric ?? ''),
-      startTime: Number.isFinite(startTime) ? startTime : 0,
-      endTime: Math.max(Number.isFinite(startTime) ? startTime : 0, Number.isFinite(endTime) ? endTime : 0),
-      isBG: Boolean(line?.isBG),
-      isDuet: Boolean(line?.isDuet),
-    }
-
-    // 调试背景歌词的翻译
-    if (result.isBG) {
-      const wordsText = words.map(w => w.word).join('')
-      logToAndroid(`[BG-LYRICS-DEBUG] Background line: "${wordsText}" | translation: "${result.translatedLyric}" | roman: "${result.romanLyric}"`)
-    }
-
-    return result
-  })
-}
-
-const state = {
+// --- shared state & globals (moved to top to avoid TDZ errors) ---
+let state = {
   lyricLines: [],
   currentTime: 0,
   isSeeking: false,
@@ -155,6 +68,21 @@ const state = {
   },
 }
 
+// insert a small stylesheet rule that lets us quickly un‑blur a single
+// line by adding the `amll-line-unblur` class. the core library already
+// applies per-line blur but this gives us a way to override a touched
+// line without turning off blur for the entire player.
+const UNBLUR_STYLE_ID = 'amll-unblur-style'
+function ensureUnblurStyle() {
+  if (document.getElementById(UNBLUR_STYLE_ID)) return
+  const s = document.createElement('style')
+  s.id = UNBLUR_STYLE_ID
+  s.textContent = `[class*="_lyricLine_"] .amll-line-unblur, [class*="_lyricLine_"].amll-line-unblur {
+  filter: none !important;
+}`
+  document.head.appendChild(s)
+}
+
 let player = null
 let rafId = null
 let lastFrameTime = -1
@@ -165,9 +93,163 @@ let currentBackgroundProfile = { ...DEFAULT_BG_PROFILE }
 let lastIncomingTime = null
 let seekUntilTs = 0
 
+// mirror important state on window so callbacks in the bundle can access them
+window.__amll = window.__amll || {}
+Object.assign(window.__amll, {
+  get player() { return player }, set player(v) { player = v },
+  get rafId() { return rafId }, set rafId(v) { rafId = v },
+  get lastFrameTime() { return lastFrameTime }, set lastFrameTime(v) { lastFrameTime = v },
+  get backgroundRender() { return backgroundRender }, set backgroundRender(v) { backgroundRender = v },
+  get lastAlbumArt() { return lastAlbumArt }, set lastAlbumArt(v) { lastAlbumArt = v },
+  get currentProfile() { return currentProfile }, set currentProfile(v) { currentProfile = v },
+  get currentBackgroundProfile() { return currentBackgroundProfile }, set currentBackgroundProfile(v) { currentBackgroundProfile = v },
+  get state() { return state }, set state(v) { state = v },
+})
+
+function amllGet(name){return window.__amll ? window.__amll[name] : undefined}
+
+// helper to write to the shared global state object
+function amllSet(name, value) {
+  if (!window.__amll) window.__amll = {}
+  window.__amll[name] = value
+  return value
+}
+
+
+function logToAndroid(message) {
+  if (typeof Android !== 'undefined' && Android?.log) {
+    Android.log(message)
+  }
+}
+
+function stripLeadingBgBracket(text) {
+  return String(text ?? '').replace(/^\s*[\(（]\s*/, '')
+}
+
+function stripTrailingBgBracket(text) {
+  return String(text ?? '').replace(/\s*[\)）]\s*$/, '')
+}
+
+function toWordEntries(line) {
+  if (Array.isArray(line?.words) && line.words.length > 0) {
+    const mapped = line.words.map((word) => ({
+      word: String(word?.word ?? ''),
+      startTime: Number(word?.startTime ?? line?.startTime ?? 0),
+      endTime: Number(word?.endTime ?? line?.endTime ?? line?.startTime ?? 0),
+    }))
+
+    const normalized = mapped.map((word) => {
+      const startTime = Number.isFinite(word.startTime) ? word.startTime : 0
+      const endTime = Number.isFinite(word.endTime) ? word.endTime : startTime
+      return {
+        ...word,
+        startTime,
+        endTime: Math.max(startTime, endTime),
+      }
+    })
+
+    // 背景歌词：去除第一个词开头的'('和最后一个词结尾的')'
+    if (line?.isBG && normalized.length > 0) {
+      logToAndroid(`[BG-LYRICS-DEBUG] Processing background lyrics with ${normalized.length} words`)
+      
+      // 去除第一个词的开头括号
+      const firstWord = normalized[0]
+      const originalFirst = firstWord.word
+      firstWord.word = stripLeadingBgBracket(firstWord.word)
+      if (firstWord.word !== originalFirst) {
+        logToAndroid(`[BG-LYRICS-DEBUG] Removed leading bracket from first word: "${originalFirst}" -> "${firstWord.word}"`)
+      } else {
+        logToAndroid(`[BG-LYRICS-DEBUG] First word unchanged after bracket strip: "${originalFirst}"`)
+      }
+
+      // 去除最后一个词的结尾括号
+      const lastWord = normalized[normalized.length - 1]
+      const originalLast = lastWord.word
+      lastWord.word = stripTrailingBgBracket(lastWord.word)
+      if (lastWord.word !== originalLast) {
+        logToAndroid(`[BG-LYRICS-DEBUG] Removed trailing bracket from last word: "${originalLast}" -> "${lastWord.word}"`)
+      } else {
+        logToAndroid(`[BG-LYRICS-DEBUG] Last word unchanged after bracket strip: "${originalLast}"`)
+      }
+
+      const afterText = normalized.map((w) => w.word).join('')
+      logToAndroid(`[BG-LYRICS-DEBUG] BG words after strip: "${afterText}"`)
+
+      for (let i = normalized.length - 1; i >= 0; i -= 1) {
+        if (String(normalized[i].word ?? '').length === 0) {
+          normalized.splice(i, 1)
+        }
+      }
+
+      if (normalized.length === 0) {
+        normalized.push({
+          word: ' ',
+          startTime: Number(line?.startTime ?? 0),
+          endTime: Number(line?.endTime ?? line?.startTime ?? 0),
+        })
+      }
+    }
+
+    return normalized
+  }
+
+  const lineText = String(line?.text ?? '').trim()
+  return [
+    {
+      word: lineText.length > 0 ? lineText : ' ',
+      startTime: Number(line?.startTime ?? 0),
+      endTime: Number(line?.endTime ?? line?.startTime ?? 0),
+    },
+  ]
+}
+
+// ensure function visible globally for older ff references
+window.toWordEntries = toWordEntries
+
+// normalizeLyricLines originally lived in main.js; the React entrypoint
+// didn't include it, resulting in a runtime reference error when
+// updateLyrics invoked it.  Define it here so bundler will package it.
+function normalizeLyricLines(lines) {
+  if (!Array.isArray(lines)) return []
+
+  return lines.map((line) => {
+    const words = toWordEntries(line)
+    const wordStart = words.length > 0 ? words[0].startTime : Number(line?.startTime ?? 0)
+    const wordEnd = words.length > 0 ? words[words.length - 1].endTime : Number(line?.endTime ?? wordStart)
+    const startTime = Number(line?.startTime ?? wordStart)
+    const endTime = Number(line?.endTime ?? wordEnd)
+
+    const result = {
+      words,
+      translatedLyric: String(line?.translatedLyric ?? ''),
+      romanLyric: String(line?.romanLyric ?? ''),
+      startTime: Number.isFinite(startTime) ? startTime : 0,
+      endTime: Number.isFinite(endTime) ? endTime : 0,
+      isBG: !!line?.isBG,
+      isDuet: !!line?.isDuet,
+    }
+
+    // fallback to word-level timings if the computed values are invalid
+    if (Number.isFinite(result.startTime) && Number.isFinite(result.endTime)) {
+      return result
+    }
+
+    return {
+      words: toWordEntries(line),
+      translatedLyric: String(line?.translatedLyric ?? ''),
+      romanLyric: String(line?.romanLyric ?? ''),
+      startTime: Number.isFinite(result.startTime) ? result.startTime : 0,
+      endTime: Number.isFinite(result.endTime) ? result.endTime : 0,
+      isBG: !!line?.isBG,
+      isDuet: !!line?.isDuet,
+    }
+  })
+}
+
 function callBackground(methodName, ...args) {
-  if (!backgroundRender || typeof backgroundRender[methodName] !== 'function') return
-  backgroundRender[methodName](...args)
+  const br = amllGet('backgroundRender') || backgroundRender
+  if (!br || typeof br[methodName] !== 'function') return
+  br[methodName](...args)
 }
 
 function getBackgroundRendererCtor(mode) {
@@ -199,26 +281,33 @@ function rebuildBackgroundRender() {
 
   backgroundRender = BackgroundRender.new(getBackgroundRendererCtor(currentBackgroundProfile.renderer))
   const bgElement = backgroundRender.getElement()
-  bgElement.style.position = 'absolute'
-  bgElement.style.inset = '0'
+  // render should sit behind lyrics and stay locked to the viewport, not
+  // scroll with the document
+  bgElement.style.position = 'fixed'
+  bgElement.style.top = '0'
+  bgElement.style.left = '0'
   bgElement.style.width = '100%'
   bgElement.style.height = '100%'
   bgElement.style.zIndex = '0'
+  // insert before #app's other children so lyrics (z-index 1) float above
   app.prepend(bgElement)
 
   applyBackgroundProfile(currentBackgroundProfile)
-  if (lastAlbumArt) {
-    callBackground('setAlbum', lastAlbumArt)
+  const art = amllGet('lastAlbumArt') || lastAlbumArt
+  if (art) {
+    callBackground('setAlbum', art)
   }
 }
 
 function callPlayer(methodName, ...args) {
-  if (!player || typeof player[methodName] !== 'function') return
-  player[methodName](...args)
+  const pl = amllGet('player') || player
+  if (!pl || typeof pl[methodName] !== 'function') return
+  pl[methodName](...args)
 }
 
 function applyMotionProfile(profile) {
   currentProfile = { ...profile }
+  if (window.__amll) window.__amll.currentProfile = currentProfile
   callPlayer('setAlignAnchor', currentProfile.alignAnchor)
   callPlayer('setAlignPosition', currentProfile.alignPosition)
   callPlayer('setEnableSpring', currentProfile.enableSpring)
@@ -243,15 +332,19 @@ function resetBlurTimeout() {
       state.blur.enabled = true
       player.getElement?.().classList.remove(TOUCH_BG_BLUR_CLASS)
       logToAndroid('[AMLL-BLUR] Blur restored after 5s inactivity')
+
+      // also cleanup any lingering line-specific overrides
+      document.querySelectorAll('.amll-line-unblur').forEach(el => el.classList.remove('amll-line-unblur'))
     }
     state.blur.timeoutId = null
   }, state.blur.TIMEOUT_MS)
 }
 
-function handleTouchStart() {
+function handleTouchStart(e) {
   // 记录触摸位置和时间
-  state.touch.startX = event?.touches?.[0]?.clientX ?? 0
-  state.touch.startY = event?.touches?.[0]?.clientY ?? 0
+  const touch = e?.touches?.[0]
+  state.touch.startX = touch?.clientX ?? 0
+  state.touch.startY = touch?.clientY ?? 0
   state.touch.startTime = Date.now()
   state.touch.isMoved = false
 
@@ -262,6 +355,18 @@ function handleTouchStart() {
     player.getElement?.().classList.add(TOUCH_BG_BLUR_CLASS)
     logToAndroid('[AMLL-BLUR] Blur disabled on touch, keep BG blurred')
   }
+
+  // also unblur just the line under the finger so that the user can
+  // tap a lyric and see it clearly without removing blur from every line.
+  try {
+    const x = touch?.clientX ?? state.touch.startX
+    const y = touch?.clientY ?? state.touch.startY
+    const el = document.elementFromPoint(x, y)
+    const lineEl = el?.closest ? el.closest('[class*="_lyricLine_"]') : null
+    if (lineEl) {
+      lineEl.classList.add('amll-line-unblur')
+    }
+  } catch (_ignored) {}
 
   resetBlurTimeout()
 }
@@ -322,6 +427,9 @@ function handleTouchEnd(e) {
     }
   }
 
+  // remove any temporary per-line unblur classes now that the touch has ended
+  document.querySelectorAll('.amll-line-unblur').forEach(el => el.classList.remove('amll-line-unblur'))
+
   resetBlurTimeout()
 }
 
@@ -355,9 +463,13 @@ function settleSeekingIfNeeded(now) {
 
 function applyPlayerStyle(element) {
   element.style.width = '100%'
-  element.style.height = '100%'
+  // let the container size itself vertically instead of forcing 100%
+  // height; the overridden calcLayout function will update the height
+  // to the total lyric length so that the page can scroll naturally.
+  element.style.height = 'auto'
   element.style.background = PLAYER_BACKGROUND
-  element.style.mixBlendMode = 'plus-lighter'
+  // avoid blend mode which may cancel out lyrics against album art
+  element.style.mixBlendMode = 'normal'
   element.style.color = '#f5f7ff'
   element.style.setProperty('--amll-lp-font-family', `var(--amll-user-font-family, ${DEFAULT_FONT_STACK})`)
   element.style.fontFamily = 'var(--amll-lp-font-family)'
@@ -448,20 +560,110 @@ function mountPlayer() {
     return
   }
 
+  // make sure the document is allowed to scroll vertically; some
+  // embed hosts might set overflow hidden by default
+  document.documentElement.style.overflowY = 'auto'
+  document.body.style.overflowY = 'auto'
+
   app.innerHTML = ''
   app.style.background = PLAYER_BACKGROUND
 
   // 重置专辑图缓存，确保新的 backgroundRender 实例会重新加载专辑图
+  amllSet('lastAlbumArt', '')
   lastAlbumArt = ''
 
   try {
+    // make sure the unblur helper stylesheet exists before we start
+    ensureUnblurStyle()
+
     rebuildBackgroundRender()
 
     player = new LyricPlayer()
+
+    // ensure every lyric line is buffered so scrolling can reach the very
+    // start/end regardless of playback position. the core library normally
+    // only keeps a few "hot" lines in memory, which caused the behaviour
+    // where only the nearby lines were rendered.
+    const originalSetLyricLines = player.setLyricLines.bind(player)
+    player.setLyricLines = function (lines, time = 0) {
+      originalSetLyricLines(lines, time)
+
+      if (this.bufferedLines) {
+        this.bufferedLines.clear()
+        for (let i = 0; i < lines.length; i++) {
+          this.bufferedLines.add(i)
+        }
+        // keep scroll index at start so user can immediately scroll upward
+        // and still reach the first line.
+        this.scrollToIndex = 0
+        this.calcLayout(true)
+      }
+    }
+
+    // ——— web-flow 布局调整 begin ———
+    // 关闭内部滚动，行的 y 位置完全由文档流决定
+    player.allowScroll = false
+
+    // 保存原始函数以备需要恢复
+    const originalCalcLayout = player.calcLayout.bind(player)
+
+    // avoid accumulating padding and scrolling offsets every frame by
+    // remembering the last value we applied.
+    // track the previous padding so we can subtract it when re‑measuring
+    // content height; this avoids accumulating padding in the element height.
+    let __lastPadding = 0
+    player.calcLayout = async function (animated = false) {
+      await originalCalcLayout(animated)
+
+      // add half‑screen blank space at top/bottom
+      const pad = this.size[1] * 0.5
+      if (this.element) {
+        this.element.style.boxSizing = 'border-box'
+        this.element.style.paddingTop = pad + 'px'
+        this.element.style.paddingBottom = pad + 'px'
+
+        // after originalCalcLayout the element height reflects just the
+        // lyric content (including whatever padding we added previously), so
+        // subtract the old padding to recover the true base height.
+        const computedHeight = parseFloat(this.element.style.height) || this.element.clientHeight || 0
+        const baseHeight = Math.max(0, computedHeight - __lastPadding * 2)
+
+        this.element.style.height = baseHeight + pad * 2 + 'px'
+        this.bottomLine.setTransform(0, baseHeight + pad, false, 0)
+      }
+
+      __lastPadding = pad
+    }
+    // ——— web-flow 布局调整 end ———
+
     const playerElement = player.getElement()
     applyPlayerStyle(playerElement)
-    playerElement.style.position = 'absolute'
-    playerElement.style.inset = '0'
+
+    // sometimes the class map from the core library fails to load and
+    // `be.lyricPlayer` becomes undefined; when that happens a stray
+    // "undefined" class gets added and it can interfere with CSS rules
+    // (in our case the element collapsed to height 0). clean it up here so
+    // the DOM node only carries real classes.
+    if (playerElement.classList.contains('undefined')) {
+      playerElement.classList.remove('undefined')
+    }
+
+    // ensure the container never collapses to zero height. "auto" works
+    // when there are lyric lines, but before any data arrives the element
+    // would have no content and the browser computes a zero height. dialing
+    // in a min-height avoids the empty‑state bug and mirrors #app's 100% rule.
+    playerElement.style.minHeight = '100vh'
+
+    // if we disabled the internal scrolling the element must remain in the
+    // normal document flow so its height can drive page scrolling; otherwise
+    // absolute positioning would collapse its parent height to zero.
+    if (player.allowScroll) {
+      playerElement.style.position = 'absolute'
+      playerElement.style.inset = '0'
+    } else {
+      playerElement.style.position = 'relative'
+      playerElement.style.inset = 'auto'
+    }
     playerElement.style.zIndex = '1'
     app.appendChild(playerElement)
 
@@ -527,6 +729,9 @@ window.setRenderMode = function (mode) {
     return
   }
 
+  // always apply a known-quality profile instead of relying on potentially
+  // uninitialized currentProfile variable (which might not exist yet when
+  // this function is invoked early in initialization)
   applyMotionProfile(QUALITY_PROFILE)
   logToAndroid(`[AMLL-CALL] setRenderMode(${mode}) -> quality profile applied`)
 }
@@ -545,6 +750,25 @@ window.updateLyrics = function (lyricsPayload) {
     }
     
     state.lyricLines = normalizeLyricLines(rawLines)
+
+    // Debug: inspect normalized results
+    if (state.lyricLines.length > 0) {
+      state.lyricLines.slice(0, 3).forEach((ln, idx) => {
+        const txt = ln.words.map(w => w.word).join('')
+        logToAndroid(`[AMLL-DEBUG] normalized line ${idx}: text="${txt}" len=${ln.words.length}`)
+      })
+    } else {
+      logToAndroid('[AMLL-WARN] normalizeLyricLines produced 0 lines')
+    }
+    logToAndroid(`[AMLL-DEBUG] lyricsPayload lines count=${rawLines.length}`)
+
+    // fallback when no lines at all
+    if (state.lyricLines.length === 0) {
+      logToAndroid('[AMLL-DEV] injecting placeholder lyric because none provided')
+      state.lyricLines = [
+        { words: [{word:'Demo',startTime:0,endTime:2000}],translatedLyric:'',romanLyric:'',startTime:0,endTime:2000,isBG:false,isDuet:false }
+      ]
+    }
 
     if (player) {
       const currentTimeToUse = Math.trunc(state.currentTime)
@@ -567,10 +791,11 @@ window.updateLyrics = function (lyricsPayload) {
 window.updateAlbumArt = async function (albumUri) {
   try {
     const uri = String(albumUri ?? '').trim()
-    if (!backgroundRender || uri.length === 0 || uri === lastAlbumArt) return
+    if (!backgroundRender || uri.length === 0 || uri === amllGet('lastAlbumArt')) return
 
     await backgroundRender.setAlbum(uri)
     lastAlbumArt = uri
+    amllSet('lastAlbumArt', uri)
     logToAndroid('[AMLL-SUCCESS] Background album art updated')
   } catch (error) {
     logToAndroid(`[AMLL-ERROR] updateAlbumArt error: ${error?.message || error}`)
@@ -580,8 +805,9 @@ window.updateAlbumArt = async function (albumUri) {
 window.updateTime = function (timeMs) {
   const now = performance.now()
   const parsedTime = Number(timeMs)
-  state.currentTime = Number.isFinite(parsedTime) ? parsedTime : 0
-  updateSeekingStateFromTime(now, state.currentTime)
+  const st = amllGet('state') || state
+  st.currentTime = Number.isFinite(parsedTime) ? parsedTime : 0
+  updateSeekingStateFromTime(now, st.currentTime)
 }
 
 window.configureLyricMotion = function (options) {
@@ -650,18 +876,20 @@ window.updateLowFreqVolume = function (value) {
 window.configureBackgroundEffect = function (options) {
   if (!options || typeof options !== 'object') return
 
+  const base = amllGet('currentBackgroundProfile') || currentBackgroundProfile
   const next = {
-    ...currentBackgroundProfile,
+    ...base,
     ...options,
   }
   if (typeof next.renderer === 'string') {
     next.renderer = next.renderer.toLowerCase() === 'mesh' ? 'mesh' : 'pixi'
   } else {
-    next.renderer = currentBackgroundProfile.renderer
+    next.renderer = base.renderer
   }
 
-  const rendererChanged = next.renderer !== currentBackgroundProfile.renderer
+  const rendererChanged = next.renderer !== base.renderer
   currentBackgroundProfile = next
+  amllSet('currentBackgroundProfile', next)
 
   if (rendererChanged) {
     rebuildBackgroundRender()
@@ -673,6 +901,11 @@ window.configureBackgroundEffect = function (options) {
 
 window.logFromKotlin = function (message) {
   logToAndroid(`[JS] ${message}`)
+}
+
+// capture uncaught errors in JS and forward to Android logcat
+window.onerror = function (msg, src, line, col, err) {
+  logToAndroid(`[AMLL-ERROR] Uncaught JS: ${msg} at ${src}:${line}:${col} ${err?err.stack:''}`)
 }
 
 window.setFontSettings = setFontSettings
@@ -693,6 +926,25 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   
   mountPlayer()
+
+  // development-only: if no Android bridge, inject a sample lyric to verify layout
+  if (typeof Android === 'undefined') {
+    logToAndroid('[AMLL-DEV] no Android object, inserting demo lyric')
+    updateLyrics({
+      lines: [{
+        words: [
+          { word: 'Hello', startTime: 0, endTime: 2000 },
+          { word: 'world', startTime: 2000, endTime: 4000 }
+        ],
+        startTime: 0,
+        endTime: 4000,
+        translatedLyric: '',
+        romanLyric: '',
+        isBG: false,
+        isDuet: false
+      }]
+    })
+  }
 
   const styleTag = document.createElement('style')
   styleTag.id = 'amll-touch-bg-blur-style'
