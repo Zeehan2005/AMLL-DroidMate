@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -563,7 +564,20 @@ fun NowPlayingCard(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    Card(modifier = modifier.clickable { onCardClick() }, elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+    // use a more noticeable background derived from the dynamic theme (primaryContainer)
+    // the default `surface` color often stays neutral/white, which gave the impression that the
+    // card wasn't changing when the album art changed. switching to a container color that is
+    // tinted by the extracted primary color makes the card follow the cover art.
+    // dark-mode tonal overlay was creating a darker rim around the card.  the
+    // Compose API doesn’t expose a `tonalElevation` parameter on cardColors, so
+    // we simply set elevation to 0; no shadow is used either, as requested.
+    Card(
+        modifier = modifier.clickable { onCardClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
         if (nowPlaying != null) {
             Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
