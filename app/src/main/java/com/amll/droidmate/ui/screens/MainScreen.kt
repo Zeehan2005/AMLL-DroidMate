@@ -48,7 +48,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -59,12 +58,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import androidx.media3.ui.DefaultTimeBar
-import androidx.media3.ui.TimeBar
 import com.amll.droidmate.R
 import com.amll.droidmate.domain.model.LyricLine
 import com.amll.droidmate.domain.model.NowPlayingMusic
@@ -581,48 +577,11 @@ fun NowPlayingCard(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-
-                // switch to Media3's DefaultTimeBar for a true player-style timeline
-                // we don't have a real Player object here, so drive the bar manually
+                var sliderValue by remember(nowPlaying.currentPosition) { mutableStateOf(nowPlaying.currentPosition.toFloat()) }
                 Column {
-                    var timeBarRef by remember { mutableStateOf<androidx.media3.ui.DefaultTimeBar?>(null) }
-
-                    // precompute theme colors in ARGB since the AndroidView is not a composable
-                    val playedColor = MaterialTheme.colorScheme.primary.toArgb()
-                    val unplayedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f).toArgb()
-
-                    AndroidView(
-                        factory = { ctx ->
-                            androidx.media3.ui.DefaultTimeBar(ctx).apply {
-                                // make the bar thin and the scrubber small to match system media controls
-                                // (DefaultTimeBar in this version doesn't expose setters for height,
-                                // they must be styled via XML attributes or left at defaults.)
-                                val density = ctx.resources.displayMetrics.density
-                                // height customization skipped; keep default sizes
-                                setPlayedColor(playedColor)
-                                setUnplayedColor(unplayedColor)
-
-                                addListener(object : androidx.media3.ui.TimeBar.OnScrubListener {
-                                    override fun onScrubStart(timeBar: androidx.media3.ui.TimeBar, position: Long) {}
-                                    override fun onScrubMove(timeBar: androidx.media3.ui.TimeBar, position: Long) {}
-                                    override fun onScrubStop(timeBar: androidx.media3.ui.TimeBar, position: Long, canceled: Boolean) {
-                                        onSeek(position)
-                                    }
-                                })
-                                timeBarRef = this
-                            }
-                        },
-                        update = { view ->
-                            val duration = nowPlaying.duration
-                            view.setDuration(duration)
-                            view.setPosition(nowPlaying.currentPosition)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(24.dp)
-                    )
+                    Slider(value = sliderValue, onValueChange = { sliderValue = it }, onValueChangeFinished = { onSeek(sliderValue.toLong()) }, valueRange = 0f..nowPlaying.duration.toFloat().coerceAtLeast(1f))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(nowPlaying.currentPosition), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        Text(formatTime(sliderValue.toLong()), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         Text(formatTime(nowPlaying.duration), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     }
                 }
