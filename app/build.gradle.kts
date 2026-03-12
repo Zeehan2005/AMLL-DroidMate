@@ -1,11 +1,9 @@
-import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 plugins {
     id("com.android.application")
-    kotlin("android") // re-add plugin for DSL support
     kotlin("plugin.serialization")
     kotlin("plugin.compose")
 }
@@ -22,7 +20,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "Alpha $buildTimestamp" // 版本号 Alpha $buildTimestamp
+        versionName = "Alpha $buildTimestamp"
         vectorDrawables.useSupportLibrary = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -41,9 +39,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+
     buildFeatures {
         compose = true
     }
@@ -51,11 +47,16 @@ android {
     lint {
         disable += listOf("FullBackupContent", "NetworkSecurityConfig")
     }
+}
 
-    applicationVariants.all {
-        outputs.all {
-            (this as BaseVariantOutputImpl).outputFileName =
-                "AMLL-DroidMate-Alpha-$buildTimestamp.apk" // 版本号 APK AMLL-DroidMate-Alpha-$buildTimestamp.apk
+// Rename APKs using the modern onVariants API
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            // Cast to implementation to access outputFileName property
+            (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set(
+                "AMLL-DroidMate-Alpha-$buildTimestamp.apk"
+            )
         }
     }
 }
@@ -70,7 +71,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.activity:activity-compose:1.8.1")
     implementation("androidx.media:media:1.7.0")
-    implementation("androidx.palette:palette:1.0.0") // 专辑色提取依赖
+    implementation("androidx.palette:palette:1.0.0")
 
     // Jetpack Compose
     implementation("androidx.compose.ui:ui")
@@ -96,25 +97,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 
-    // Lyrics Helper (Unilyric)
-    // 注: 实际项目应该使用他们发布的库或直接集成源码
-    // implementation("com.github.apoint123:unilyric-android:main")
-
-    // TTML parsing and display
-    // 注: 应该集成amll-ttml-db的Android版本
-    // implementation("com.github.amll-dev:amll-ttml-android:main")
-
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")
 
-    // Database (Room) - for caching lyrics
+    // Database (Room)
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
-    // Ktor mock engine for unit testing HTTP interactions
     testImplementation("io.ktor:ktor-client-mock:2.3.6")
     testImplementation("io.ktor:ktor-client-mock-jvm:2.3.6")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
