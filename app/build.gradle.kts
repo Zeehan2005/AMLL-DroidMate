@@ -5,9 +5,9 @@ import java.util.Locale
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.serialization")
-    id("org.jetbrains.kotlin.plugin.compose")
+    kotlin("android") // re-add plugin for DSL support
+    kotlin("plugin.serialization")
+    kotlin("plugin.compose")
 }
 
 val buildTimestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
