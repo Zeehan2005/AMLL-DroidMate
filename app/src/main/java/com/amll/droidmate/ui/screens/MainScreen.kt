@@ -505,6 +505,7 @@ fun MainScreen() {
                         nowPlaying = nowPlaying,
                         lyrics = lyrics,
                         currentTime = currentTime,
+                        // pass play state for pause detection
                         webViewReloadKey = webViewReloadKey,
                         onLineSeek = { viewModel.seekTo(it); resetHideTimer() },
                         amllDebugSource = "fullscreen",
@@ -603,7 +604,16 @@ private fun LyricsVisualLayer(
         // only create the WebView if we actually have lyrics; avoids unnecessary page loads
         if (lyrics != null) {
             androidx.compose.runtime.key(webViewReloadKey, amllDebugSource) {
-                AMLLLyricsView(lyrics = lyrics, currentTime = currentTime, albumArtUri = nowPlaying?.albumArtUri, renderMode = AMLLRenderMode.DOM, debugSource = amllDebugSource, onLineSeek = onLineSeek, modifier = Modifier.fillMaxSize())
+                AMLLLyricsView(
+                    lyrics = lyrics,
+                    currentTime = currentTime,
+                    isPlaying = nowPlaying?.isPlaying == true,
+                    albumArtUri = nowPlaying?.albumArtUri,
+                    renderMode = AMLLRenderMode.DOM,
+                    debugSource = amllDebugSource,
+                    onLineSeek = onLineSeek,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
         if (onFullscreenTap != null) {

@@ -54,6 +54,7 @@ const TOUCH_BG_BLUR_CLASS = 'amll-touch-unblur'
 let state = {
   lyricLines: [],
   currentTime: 0,
+  isPaused: false, // track whether playback is currently paused
   isSeeking: false,
   blur: {
     enabled: true,
@@ -82,6 +83,40 @@ function ensureUnblurStyle() {
 }`
   document.head.appendChild(s)
 }
+
+// when playback is paused the library still leaves CSS animations running
+// on the currently active line, which makes the text look like it's still
+// moving even though the rest of the player has frozen. we inject a
+// stylesheet that sets `animation-play-state: paused` and zeroes out
+// transition durations whenever the root player element carries the
+// `amll-paused` class. the class is toggled from `updateTime` below.
+//
+// previously we only targeted the *main* line so background or duet
+// lyrics continued animating; pause should freeze whatever line is
+// currently active, regardless of its semantic role.
+const PAUSE_STYLE_ID = 'amll-pause-style'
+function ensurePauseStyle() {
+  if (document.getElementById(PAUSE_STYLE_ID)) return
+  const s = document.createElement('style')
+  s.id = PAUSE_STYLE_ID
+  s.textContent = `
+/* freeze any active lyric line when paused (main / background / duet) */
+.amll-lyric-player.amll-paused [class*="_lyricLine_"][class*="_active_"] *,
+.amll-lyric-player.amll-paused [class*="_lyricLine_"][class*="_active_"] ._romanWord_*,
+.amll-lyric-player.amll-paused [class*="_lyricLine_"][class*="_active_"] ._emphasizeWrapper_*,
+/* also prevent any span under the active line from transforming */
+.amll-lyric-player.amll-paused [class*="_lyricLine_"][class*="_active_"] span {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
+  transform: none !important;
+  /* prevent mask-* properties from animating when we rely on inline
+     styles to freeze them above */
+  mask-size: inherit !important;
+  -webkit-mask-size: inherit !important;
+}
+`
+  document.head.appendChild(s)
+}    
 
 let player = null
 let rafId = null
@@ -161,6 +196,22 @@ function toWordEntries(line) {
       } else {
         logToAndroid(`[BG-LYRICS-DEBUG] First word unchanged after bracket strip: "${originalFirst}"`)
       }
+    }
+
+    // for non-background lyrics, insert spaces between successive words if they
+    // look like Latin/ASCII to avoid English words sticking together
+    if (!line?.isBG && normalized.length > 1) {
+      const hasLatin = normalized.some(w => /[A-Za-z0-9]/.test(w.word))
+      if (hasLatin) {
+        for (let i = 0; i < normalized.length - 1; i++) {
+          const cur = normalized[i]
+          const next = normalized[i + 1]
+          if (!cur.word.endsWith(' ') && !next.word.startsWith(' ')) {
+            cur.word += ' '
+          }
+        }
+      }
+    }
 
       // 去除最后一个词的结尾括号
       const lastWord = normalized[normalized.length - 1]
@@ -420,6 +471,12 @@ function handleTouchEnd(e) {
           })
           lyricLine.dispatchEvent(clickEvent)
           logToAndroid(`[AMLL-TAP] Dispatched click event`)
+
+          // always reload after a user tap; this restarts the animation on
+          // whichever line ends up being active (current line or the one
+          // the player jumped to), fulfilling the “replay current line”
+          // requirement.
+          setTimeout(reloadCurrentLine, 50)
         }
       }
     } catch (error) {
@@ -431,7 +488,7 @@ function handleTouchEnd(e) {
   document.querySelectorAll('.amll-line-unblur').forEach(el => el.classList.remove('amll-line-unblur'))
 
   resetBlurTimeout()
-}
+}    
 
 function markSeeking(now) {
   state.isSeeking = true
@@ -463,10 +520,25 @@ function settleSeekingIfNeeded(now) {
 
 function applyPlayerStyle(element) {
   element.style.width = '100%'
-  // let the container size itself vertically instead of forcing 100%
-  // height; the overridden calcLayout function will update the height
-  // to the total lyric length so that the page can scroll naturally.
+  // allow the container to size itself vertically rather than forcing a
+  // fixed height. lines will be left in the normal flow and no translation
+  // is applied, allowing the page scrollbar to move them directly.
   element.style.height = 'auto'
+  element.style.overflowY = 'auto'
+  element.style.maxHeight = '100vh'
+
+  // because the library's base stylesheet forces lyric lines to be
+  // absolutely positioned, we inject a small override rule here. that
+  // shifts every `._lyricLine_…` element back into the normal document
+  // flow so scrolling is courtesy of the page rather than manual transforms.
+  if (!document.getElementById('amll-flow-override')) {
+    const rule = `.amll-lyric-player [class*="_lyricLine_"] { position: static !important; transform: none !important; margin: 0 !important; }`;
+    const styleTag = document.createElement('style')
+    styleTag.id = 'amll-flow-override'
+    styleTag.textContent = rule
+    document.head.appendChild(styleTag)
+  }
+
   element.style.background = PLAYER_BACKGROUND
   // avoid blend mode which may cancel out lyrics against album art
   element.style.mixBlendMode = 'normal'
@@ -526,6 +598,27 @@ function setFontSettings(fontFamily, activeFontFamilyNames = [], fontFiles = [])
   }
 }
 
+// visibility logging helps detect if the WebView/page is being
+// backgrounded or paused by the host. record initial state and
+// subsequent changes to help diagnose timer throttling or pause
+// behavior that can interfere with DOM updates.
+function initVisibilityLogging() {
+  try {
+    logToAndroid(`[AMLL-VIS] initial visibility=${document.visibilityState} hidden=${document.hidden}`)
+    document.addEventListener('visibilitychange', () => {
+      try {
+        logToAndroid(`[AMLL-VIS] visibilitychange => ${document.visibilityState} hidden=${document.hidden}`)
+      } catch (_e) {}
+    })
+    window.addEventListener('pagehide', () => {
+      try { logToAndroid('[AMLL-VIS] pagehide') } catch (_e) {}
+    })
+    window.addEventListener('pageshow', () => {
+      try { logToAndroid('[AMLL-VIS] pageshow') } catch (_e) {}
+    })
+  } catch (_e) {}
+}
+
 function animationFrameLoop() {
   if (!player) return
 
@@ -533,6 +626,13 @@ function animationFrameLoop() {
     const now = performance.now()
     const delta = lastFrameTime === -1 ? 0 : now - lastFrameTime
     lastFrameTime = now
+
+    // if paused we still want the RAF ticking so we can detect resume,
+    // but avoid calling into the player to move any animations.
+    if (state.isPaused) {
+      rafId = window.requestAnimationFrame(animationFrameLoop)
+      return
+    }
 
     settleSeekingIfNeeded(now)
     callPlayer('setCurrentTime', Math.trunc(state.currentTime), state.isSeeking)
@@ -573,8 +673,9 @@ function mountPlayer() {
   lastAlbumArt = ''
 
   try {
-    // make sure the unblur helper stylesheet exists before we start
+    // make sure the helper stylesheets exist before we start
     ensureUnblurStyle()
+    ensurePauseStyle()
 
     rebuildBackgroundRender()
 
@@ -588,84 +689,170 @@ function mountPlayer() {
     player.setLyricLines = function (lines, time = 0) {
       originalSetLyricLines(lines, time)
 
-      if (this.bufferedLines) {
+      // ensure every lyric line is buffered so scrolling can reach the very
+      // start/end regardless of playback position. the core library normally
+      // only keeps a few "hot" lines in memory, which caused the behaviour
+      // where only the nearby lines were rendered. we also guard against the
+      // unlikely case where `bufferedLines` hasn't been initialized yet by
+      // retrying on the next tick.
+      const bufferAllLines = () => {
+        if (this.bufferedLines) {
+          this.bufferedLines.clear()
+          for (let i = 0; i < lines.length; i++) {
+            this.bufferedLines.add(i)
+          }
+          // keep scroll index at start so user can immediately scroll upward
+          // and still reach the first line.
+          this.scrollToIndex = 0
+          // also make sure the container actually scrolls to top
+          if (this.element) {
+            this.element.scrollTop = 0
+          }
+          this.calcLayout(true)
+        } else {
+          // try again later; most likely bufferedLines will exist shortly
+          setTimeout(bufferAllLines, 0)
+        }
+      }
+
+      bufferAllLines()
+    }
+
+    // keep bufferedLines full whenever currentTime changes; the original
+    // method prunes entries based on position, which caused the scrollable
+    // area to shrink while lyrics were playing.
+    const originalSetCurrentTime = player.setCurrentTime.bind(player)
+    player.setCurrentTime = function (time, seeking = false) {
+      originalSetCurrentTime(time, seeking)
+      if (this.bufferedLines && Array.isArray(this.currentLyricLines)) {
         this.bufferedLines.clear()
-        for (let i = 0; i < lines.length; i++) {
+        for (let i = 0; i < this.currentLyricLines.length; i++) {
           this.bufferedLines.add(i)
         }
-        // keep scroll index at start so user can immediately scroll upward
-        // and still reach the first line.
-        this.scrollToIndex = 0
-        this.calcLayout(true)
       }
     }
 
-    // ——— web-flow 布局调整 begin ———
-    // 关闭内部滚动，行的 y 位置完全由文档流决定
-    player.allowScroll = false
+    // revert to default scrolling behaviour: keep players lines in DOM flow
+    // instead of clamping height and translating them manually.
+    player.allowScroll = true
 
-    // 保存原始函数以备需要恢复
-    const originalCalcLayout = player.calcLayout.bind(player)
+    // keep the library's internal scroll handler logic for offset tracking
+    // but avoid `preventDefault` so native scrolling is allowed.
+    player.beginScrollHandler = function() {
+      const e = this.allowScroll;
+      if (e) {
+        this.isScrolled = true;
+        clearTimeout(this.scrolledHandler);
+        this.scrolledHandler = setTimeout(() => {
+          this.isScrolled = false;
+          this.scrollOffset = 0;
+        }, 5000);
+      }
+      return false; // do NOT intercept the event
+    }
 
-    // avoid accumulating padding and scrolling offsets every frame by
-    // remembering the last value we applied.
-    // track the previous padding so we can subtract it when re‑measuring
-    // content height; this avoids accumulating padding in the element height.
-    let __lastPadding = 0
+    // after each layout run the library assigns transforms to each line. we
+    // clear them so lines stay in their natural document position.
+    // override calcLayout completely: we don't want the library to
+    // wrap the original layout so we can drop its spacer/transform logic
+    const originalCalcLayout2 = player.calcLayout.bind(player)
     player.calcLayout = async function (animated = false) {
-      await originalCalcLayout(animated)
-
-      // add half‑screen blank space at top/bottom
-      const pad = this.size[1] * 0.5
-      if (this.element) {
-        this.element.style.boxSizing = 'border-box'
-        this.element.style.paddingTop = pad + 'px'
-        this.element.style.paddingBottom = pad + 'px'
-
-        // after originalCalcLayout the element height reflects just the
-        // lyric content (including whatever padding we added previously), so
-        // subtract the old padding to recover the true base height.
-        const computedHeight = parseFloat(this.element.style.height) || this.element.clientHeight || 0
-        const baseHeight = Math.max(0, computedHeight - __lastPadding * 2)
-
-        this.element.style.height = baseHeight + pad * 2 + 'px'
-        this.bottomLine.setTransform(0, baseHeight + pad, false, 0)
+      await originalCalcLayout2(animated)
+      // remove the spacer inserted by the original layout
+      const sp = document.getElementById('amll-spacer')
+      if (sp && sp.parentElement) {
+        sp.parentElement.removeChild(sp)
       }
-
-      __lastPadding = pad
+        // clear transforms on every line element (not just currentLyricLineObjects)
+        if (this.element) {
+          this.element.querySelectorAll('[class*="_lyricLine_"]').forEach(el => {
+            el.style.transform = ''
+          })
+        }
+        this.scrollBoundary[1] = max
+        // if the library is not currently tracking a user scroll, allow it
+        // to drive the scrollTop; otherwise leave the native position alone
+        if (!this.isScrolled) {
+          this.element.scrollTop = this.scrollOffset
+        } else {
+          // keep offset in sync with what the user has done
+          this.scrollOffset = this.element.scrollTop
+        }
+      }
     }
-    // ——— web-flow 布局调整 end ———
 
     const playerElement = player.getElement()
     applyPlayerStyle(playerElement)
 
-    // sometimes the class map from the core library fails to load and
-    // `be.lyricPlayer` becomes undefined; when that happens a stray
-    // "undefined" class gets added and it can interfere with CSS rules
-    // (in our case the element collapsed to height 0). clean it up here so
-    // the DOM node only carries real classes.
+    // disable per-line transforms entirely; they interfere with flow-based
+    // layout and contributed to huge gaps when we removed absolute positioning.
+    if (player.currentLyricLineObjects && player.currentLyricLineObjects.length > 0) {
+      const LineClass = player.currentLyricLineObjects[0].constructor
+      if (LineClass && LineClass.prototype) {
+        // transforms are unnecessary when we flow the lines normally,
+        // disabling avoids conflicts and large gaps
+        LineClass.prototype.setTransform = function() {}
+
+        // the core library hides offscreen lines to reduce DOM size,
+        // which causes only a handful of elements to be present. for
+        // our use-case we want every line to stay in the document so
+        // scrolling can reach the very start and end. override the
+        // hide() method so it does nothing and keep show() available.
+        if (typeof LineClass.prototype.hide === 'function') {
+          LineClass.prototype.hide = function() {
+            /* no-op: preserve element in DOM */
+          }
+        }
+
+        // disable the visibility check that normally skips rendering
+        // of lines outside the viewport. always return true.
+        Object.defineProperty(LineClass.prototype, 'isInSight', {
+          get() {
+            return true
+          }
+        })
+
+        // even though hide() is inert, some update loops choose between
+        // show/hide based on isInSight; make sure show() always runs.
+        if (typeof LineClass.prototype.update === 'function') {
+          const orig = LineClass.prototype.update
+          LineClass.prototype.update = function(delta = 0) {
+            orig.call(this, delta)
+            try {
+              this.show()
+            } catch (_e) {}
+          }
+        }
+
+        // ensure show still re-attaches if something odd happened
+        // (it typically won't be needed, but leaving it in place is
+        // harmless).
+      }
+    }
+
+    // cleanup stray undefined class as before
     if (playerElement.classList.contains('undefined')) {
       playerElement.classList.remove('undefined')
     }
 
-    // ensure the container never collapses to zero height. "auto" works
-    // when there are lyric lines, but before any data arrives the element
-    // would have no content and the browser computes a zero height. dialing
-    // in a min-height avoids the empty‑state bug and mirrors #app's 100% rule.
+    // ensure a reasonable minimum height so #app doesn't collapse
     playerElement.style.minHeight = '100vh'
 
-    // if we disabled the internal scrolling the element must remain in the
-    // normal document flow so its height can drive page scrolling; otherwise
-    // absolute positioning would collapse its parent height to zero.
     if (player.allowScroll) {
-      playerElement.style.position = 'absolute'
-      playerElement.style.inset = '0'
-    } else {
+      // non-fixed; it will scroll naturally with document
       playerElement.style.position = 'relative'
-      playerElement.style.inset = 'auto'
     }
     playerElement.style.zIndex = '1'
     app.appendChild(playerElement)
+
+    // touchAction not needed since element no longer covers viewport fully,
+    // but leaving pan-y doesn't hurt for occasional fixed children.
+    playerElement.style.touchAction = 'pan-y'
+    // keep library scrollOffset in sync when user scrolls via scrollbar/keys
+    playerElement.addEventListener('scroll', () => {
+      player.scrollOffset = playerElement.scrollTop
+    })
+
 
     logToAndroid(`[AMLL-INIT] Core LyricPlayer created, container width=${app.clientWidth}, height=${app.clientHeight}`)
 
@@ -771,11 +958,46 @@ window.updateLyrics = function (lyricsPayload) {
     }
 
     if (player) {
-      const currentTimeToUse = Math.trunc(state.currentTime)
+      let currentTimeToUse = Math.trunc(state.currentTime)
       logToAndroid(`[AMLL-INFO] Updating lyrics with currentTime=${currentTimeToUse}ms`)
+
+      // when paused we may be sitting in the gap between two lines; calling
+      // setLyricLines with that timestamp caused the library to wipe the DOM
+      // (no active line), so pick a safe nearby time instead. if we're before
+      // the first line also jump to the first lyric so the user isn't staring at
+      // an empty screen while playback is paused at the very start.
+      if (state.isPaused && Array.isArray(state.lyricLines) && state.lyricLines.length > 0) {
+        const inRange = state.lyricLines.find(l => l.startTime <= currentTimeToUse && currentTimeToUse < l.endTime)
+        if (!inRange) {
+          const prevIdx = state.lyricLines.map(l => l.startTime).findIndex(s => s > currentTimeToUse) - 1
+          if (prevIdx >= 0) {
+            currentTimeToUse = state.lyricLines[prevIdx].startTime
+            logToAndroid(`[AMLL-DEBUG] paused gap adjusted time to previous line at ${currentTimeToUse}ms`)
+          } else {
+            // no previous line – we're before the first lyric
+            currentTimeToUse = state.lyricLines[0].startTime
+            logToAndroid(`[AMLL-DEBUG] paused gap before first line, shifting time to ${currentTimeToUse}ms`)
+          }
+        }
+      }
+
       callPlayer('setLyricLines', state.lyricLines, currentTimeToUse)
       callPlayer('setCurrentTime', currentTimeToUse, true)
       callPlayer('update', 0)
+
+      // if we're currently paused the animation loop will ignore
+      // further updates; force a rebuild of the active line so that
+      // the UI isn't left completely empty until playback resumes.
+      // Delay the reload slightly to give the player a tick to build
+      // its internal line objects (fixes case where lyrics arrive
+      // while paused but DOM nodes aren't ready yet).
+      if (state.isPaused) {
+        setTimeout(() => {
+          try {
+            reloadCurrentLine()
+          } catch (_e) {}
+        }, 30)
+      }
       logToAndroid(`[AMLL-SUCCESS] Updated player with ${state.lyricLines.length} lines`)
     }
     if (backgroundRender) {
@@ -783,6 +1005,26 @@ window.updateLyrics = function (lyricsPayload) {
     }
 
     logToAndroid(`[AMLL-SUCCESS] Updated lyrics (${state.lyricLines.length} lines)`)
+    // remember payload so a reload while paused will still display
+    try {
+      if (Array.isArray(lyricsPayload.lines) && lyricsPayload.lines.length > 0) {
+        localStorage.setItem('amll-last-lyrics', JSON.stringify(lyricsPayload))
+      } else {
+        localStorage.removeItem('amll-last-lyrics')
+      }
+    } catch (_e) {
+      /* ignore quota errors */
+    }
+    // also save current playback state (time & pause) so we can recreate
+    // it on restart
+    try {
+      localStorage.setItem('amll-last-state', JSON.stringify({
+        currentTime: state.currentTime,
+        isPaused: state.isPaused,
+      }))
+    } catch (_e) {
+      /* ignore */
+    }
   } catch (error) {
     logToAndroid(`[AMLL-ERROR] updateLyrics error: ${error?.message || error}`)
   }
@@ -802,13 +1044,269 @@ window.updateAlbumArt = async function (albumUri) {
   }
 }
 
-window.updateTime = function (timeMs) {
+// helper used when we need to force the player to rebuild/render *only* the
+// currently active lyric line. previously we reloaded the whole set of
+// lines, which caused a full DOM rebuild of the player and a visible
+// flash whenever the play state flipped; the original comment (above) still
+// applies, but most of the time only the active line actually needs to be
+// reset. rebuilding a single entry also keeps scrolling/placement intact.
+//
+// The strategy below finds the index of the line that covers the current
+// timestamp and invokes the line object's own `rebuildElement()` method. If
+// for some reason the library doesn't expose that method we fall back to the
+// old behaviour as a safety net.
+function reloadCurrentLine() {
+  if (!player || !Array.isArray(state.lyricLines) || state.lyricLines.length === 0) return
+  const t = Math.trunc(state.currentTime)
+  const lines = state.lyricLines
+  // find the first line whose interval contains the current time
+  let idx = lines.findIndex(l => l.startTime <= t && t < l.endTime)
+
+  // If time falls in a gap between lines (common when paused), keep the
+  // most recently visible line instead of wiping the DOM clean.
+  if (idx === -1) {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (lines[i].startTime <= t) {
+        idx = i
+        break
+      }
+    }
+  }
+
+  // If no line is applicable (e.g. before the first lyric), do nothing.
+  if (idx === -1) {
+    return
+  }
+
+  const obj = player.currentLyricLineObjects?.[idx]
+  if (obj && typeof obj.rebuildElement === 'function') {
+    // clear built flag so rebuildElement actually recreates the DOM
+    obj.built = false
+
+    // dump some pre-rebuild diagnostics
+    try {
+      const totalLines = player?.currentLyricLineObjects?.length ?? 0
+      const playerEl = player?.getElement && player.getElement()
+      const playerChildren = playerEl ? playerEl.childElementCount : 0
+      logToAndroid(`[AMLL-DUMP] pre-rebuild idx=${idx} totalLines=${totalLines} playerChildren=${playerChildren}`)
+      const maybeLine = obj.getLine && obj.getLine()
+      try {
+        logToAndroid(`[AMLL-DUMP] pre-rebuild lineData idx=${idx} => ${JSON.stringify(maybeLine)}`)
+      } catch (_e) {
+        logToAndroid(`[AMLL-DUMP] pre-rebuild lineData idx=${idx} => [unserializable]`)
+      }
+    } catch (_e) {}
+
+    // perform rebuild then poll for a non-empty element before giving up
+    obj.rebuildElement()
+    // recalc layout so any size changes are applied immediately
+    player.calcLayout && player.calcLayout(true)
+
+    // helper: poll for meaningful content on the rebuilt element
+    async function pollForElementContent(targetObj, maxWaitMs = 200, intervalMs = 10) {
+      const attempts = Math.max(1, Math.ceil(maxWaitMs / intervalMs))
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          const el = targetObj.getElement && targetObj.getElement()
+          const textLen = el ? (el.textContent || '').trim().length : 0
+          const childCount = el ? el.childElementCount : 0
+          if (textLen > 0 || childCount > 0) return true
+        } catch (_e) {}
+        // wait before next try
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, intervalMs))
+      }
+      return false
+    }
+
+    // detailed post-rebuild diagnostics: element child count and text length
+    try {
+      const el = obj.getElement && obj.getElement()
+      const textLen = el ? (el.textContent || '').trim().length : 0
+      const childCount = el ? el.childElementCount : 0
+      const outerLen = el ? (el.outerHTML || '').length : 0
+      logToAndroid(`[AMLL-DUMP] post-rebuild idx=${idx} childCount=${childCount} textLen=${textLen} outerLen=${outerLen}`)
+
+      // also try to re-log the line data after rebuild
+      try {
+        const lineData = obj.getLine && obj.getLine()
+        logToAndroid(`[AMLL-DUMP] post-rebuild lineData idx=${idx} => ${JSON.stringify(lineData)}`)
+      } catch (_e) {
+        logToAndroid(`[AMLL-DUMP] post-rebuild lineData idx=${idx} => [unserializable]`)
+      }
+
+      // if element still empty, attempt short polling before immediate fallback
+      const hasContent = (textLen > 0) || (childCount > 0)
+      if (!hasContent) {
+        logToAndroid(`[AMLL-WARN] rebuilt line ${idx} produced empty element — starting poll (max 200ms) at ${t}ms`)
+        try {
+          pollForElementContent(obj, 200, 10).then((ok) => {
+            if (ok) {
+              logToAndroid(`[AMLL-DEBUG] reloadCurrentLine poll succeeded for idx=${idx} at ${t}ms`)
+            } else {
+              logToAndroid(`[AMLL-WARN] reloadCurrentLine poll failed for idx=${idx}, performing immediate full reload at ${t}ms`)
+              try {
+                callPlayer('setLyricLines', lines, t)
+                callPlayer('setCurrentTime', t, true)
+                callPlayer('update', 0)
+                logToAndroid(`[AMLL-DEBUG] reloadCurrentLine immediate full reload executed at ${t}ms`)
+              } catch (err) {
+                logToAndroid(`[AMLL-ERROR] reloadCurrentLine immediate fallback failed: ${err?.message || err}`)
+              }
+            }
+          }).catch((err) => {
+            logToAndroid(`[AMLL-ERROR] reloadCurrentLine poll error: ${err?.message || err}`)
+          })
+        } catch (err) {
+          logToAndroid(`[AMLL-ERROR] reloadCurrentLine poll setup failed: ${err?.message || err}`)
+        }
+      } else {
+        logToAndroid(`[AMLL-DEBUG] reloadCurrentLine rebuilt index ${idx} at ${t}ms`)
+      }
+    } catch (err) {
+      logToAndroid(`[AMLL-ERROR] reloadCurrentLine verify error: ${err?.message || err}`)
+    }
+  } else {
+    // safe fallback if the internal structure is not what we expect
+    callPlayer('setLyricLines', lines, t)
+    callPlayer('setCurrentTime', t, true)
+    callPlayer('update', 0)
+    logToAndroid(`[AMLL-DEBUG] reloadCurrentLine (fallback full reload) at ${t}ms`)
+  }
+  // always issue an explicit update so paused state still paints the
+  // current line; without this the rebuilt DOM can sit invisible until
+  // the next resume trigger.
+  callPlayer('update', 0)
+}
+
+
+// when pausing we only want to lock the mask-size property so the
+// highlight width remains fixed. other animations (float, color, etc.)
+// should continue running so the still‑paused view still looks "alive".
+//
+// this helper freezes *just* maskSize because that was the only property
+// causing the green box issue; maskPosition will continue updating so the
+// highlight can still scroll horizontally if the animation loop is running.
+function freezeMaskSizeOnly() {
+  if (!player || !player.currentLyricLineObjects) return
+  for (const lineObj of player.currentLyricLineObjects) {
+    if (!Array.isArray(lineObj.splittedWords)) continue
+    for (const w of lineObj.splittedWords) {
+      const el = w.mainElement
+      if (el) {
+        const cs = window.getComputedStyle(el)
+        const size = cs.maskSize || cs.webkitMaskSize
+        if (size) {
+          el.style.maskSize = size
+          el.style.webkitMaskSize = size
+        }
+      }
+      // leave any maskAnimations running
+    }
+  }
+}
+
+window.setPaused = function (paused) {
+  // explicit API: freeze or resume the current active line animations
+  const st = amllGet('state') || state
+  if (paused) {
+    if (!st.isPaused) {
+      st.isPaused = true
+      // don't call player.pause(): the library's internal pause mode
+      // clears DOM and halts background work, which makes lines vanish
+      // when we pause mid‑buffer. our own animationFrameLoop already
+      // ignores updates when `isPaused` is true, so we can just leave the
+      // player running and manually freeze visuals.
+      const el = player?.getElement?.()
+      if (el) el.classList.add('amll-paused')
+      reloadCurrentLine()
+      freezeMaskSizeOnly()
+    }
+  } else {
+    if (st.isPaused) {
+      st.isPaused = false
+      // likewise avoid player.resume(); the animation loop will restart
+      // updates automatically when `isPaused` flips to false.
+      const el = player?.getElement?.()
+      if (el) el.classList.remove('amll-paused')
+      reloadCurrentLine()
+      document.documentElement.style.removeProperty('--amll-player-time')
+    }
+  }
+  // persist state each time it changes
+  try {
+    localStorage.setItem('amll-last-state', JSON.stringify({
+      currentTime: st.currentTime,
+      isPaused: st.isPaused,
+    }))
+  } catch (_e) {}
+}
+
+window.updateTime = function (timeMs, isPausedArg) {
   const now = performance.now()
   const parsedTime = Number(timeMs)
   const st = amllGet('state') || state
+  const prev = st.currentTime
   st.currentTime = Number.isFinite(parsedTime) ? parsedTime : 0
+
+  // if caller explicitly passed a paused flag, trust it instead of
+  // inferring from the time value. this lets the host bridge tell us
+  // when playback stopped (useful for e.g. seek-as-pause events).
+  const explicitPause = (typeof isPausedArg === 'boolean') ? isPausedArg : null
+
+  if (explicitPause !== null) {
+    if (explicitPause && !st.isPaused) {
+      st.isPaused = true
+      logToAndroid('[AMLL-PLAY] pause flag received, player paused')
+      const el = player?.getElement?.()
+      if (el) el.classList.add('amll-paused')
+      reloadCurrentLine()
+      freezeMaskSizeOnly()
+    } else if (!explicitPause && st.isPaused) {
+      st.isPaused = false
+      logToAndroid('[AMLL-PLAY] resume flag received, player resumed')
+      const el = player?.getElement?.()
+      if (el) el.classList.remove('amll-paused')
+      reloadCurrentLine()
+      document.documentElement.style.removeProperty('--amll-player-time')
+    }
+    // still handle backward seeks when time moves backwards
+    if (st.currentTime < prev) {
+      logToAndroid(`[AMLL-PLAY] backward seek (${prev} -> ${st.currentTime}), reloading line`)
+      reloadCurrentLine()
+    }
+  } else {
+    // fall back to original detection logic if no flag supplied
+    if (st.currentTime === prev) {
+      if (!st.isPaused) {
+        st.isPaused = true
+        // don't invoke player.pause so DOM stays populated
+        logToAndroid('[AMLL-PLAY] detected pause, player paused')
+        const el = player?.getElement?.()
+        if (el) el.classList.add('amll-paused')
+        reloadCurrentLine()
+        freezeMaskSizeOnly()
+      }
+    } else {
+      if (st.isPaused) {
+        st.isPaused = false
+        // again avoid player.resume; our own loop will handle updates
+        logToAndroid('[AMLL-PLAY] playback resumed, player resumed')
+        const el = player?.getElement?.()
+        if (el) el.classList.remove('amll-paused')
+        // ensure any active line restarts its animation
+        reloadCurrentLine()
+      }
+      // backward jump also counts as a replay/seek
+      if (st.currentTime < prev) {
+        logToAndroid(`[AMLL-PLAY] backward seek (${prev} -> ${st.currentTime}), reloading line`)
+        reloadCurrentLine()
+      }
+    }
+  }
+
   updateSeekingStateFromTime(now, st.currentTime)
-}
+}    
 
 window.configureLyricMotion = function (options) {
   if (!options || typeof options !== 'object') return
@@ -913,6 +1411,8 @@ window.setFontSettings = setFontSettings
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.style.background = 'transparent'
   document.body.style.background = 'transparent'
+  // start visibility logging early so we capture host-driven pause/hidden events
+  initVisibilityLogging()
   
   // 检查 Android 接口是否可用
   if (typeof Android !== 'undefined' && Android?.log) {
@@ -926,6 +1426,46 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   
   mountPlayer()
+
+  // if we previously stored lyrics in localStorage (e.g. user refreshed
+  // while paused) reapply them now. this avoids a blank screen until the
+  // host bridge re-sends the payload.
+  try {
+    const saved = localStorage.getItem('amll-last-lyrics')
+    if (saved) {
+      const payload = JSON.parse(saved)
+      if (payload && Array.isArray(payload.lines) && payload.lines.length > 0) {
+        logToAndroid('[AMLL-INIT] restoring lyrics from localStorage')
+        updateLyrics(payload)
+      }
+    }
+    // restore playback state too
+    const stateSaved = localStorage.getItem('amll-last-state')
+    if (stateSaved) {
+      const st = JSON.parse(stateSaved)
+      if (st && typeof st.isPaused === 'boolean') {
+        state.currentTime = Number.isFinite(st.currentTime) ? st.currentTime : state.currentTime
+        state.isPaused = st.isPaused
+        if (player) {
+          // make sure the player itself reflects the restored time so
+          // that the correct line is already visible (or will be when we
+          // freeze it below). without this the UI could show the first
+          // lyric while the timestamp sits later in the song, which can
+          // look like a blank screen if the early range has no content.
+          callPlayer('setCurrentTime', state.currentTime, true)
+        }
+        if (state.isPaused) {
+          // call setPaused to apply visual freezing; it will also
+          // rebuild the current line so that the paused view isn’t
+          // empty when the page is loaded while playback is stopped.
+          setPaused(true)
+        }
+        logToAndroid(`[AMLL-INIT] restored state paused=${state.isPaused} time=${state.currentTime}`)
+      }
+    }
+  } catch (_e) {
+    // ignore malformed JSON
+  }
 
   // development-only: if no Android bridge, inject a sample lyric to verify layout
   if (typeof Android === 'undefined') {

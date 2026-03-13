@@ -424,6 +424,9 @@ object QqMusicQrcCrypto {
 
     fun looksLikeHex(text: String): Boolean {
         val normalized = text.trim().lowercase(Locale.ROOT)
-        return normalized.isNotEmpty() && normalized.length % 2 == 0 && normalized.all { it in '0'..'9' || it in 'a'..'f' }
+        if (normalized.isEmpty() || normalized.length % 2 != 0) return false
+        // require block-aligned to avoid trying decryption on arbitrary short hex strings
+        if (normalized.length % DES_BLOCK_SIZE != 0) return false
+        return normalized.all { it in '0'..'9' || it in 'a'..'f' }
     }
 }

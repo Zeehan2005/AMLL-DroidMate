@@ -9,6 +9,8 @@ import io.ktor.http.*
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Assume.assumeTrue
+import com.amll.droidmate.data.network.QqMusicQrcCrypto
 
 // domain models used in tests
 import com.amll.droidmate.domain.model.LyricsSearchResult
@@ -109,6 +111,120 @@ class LyricsRepositoryTest {
     }
 
     @Test
+    fun `mockengine intercepts get requests`() = runTest {
+        var seen = false
+        val engine = MockEngine { request ->
+            seen = true
+            respond("ok", HttpStatusCode.OK)
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        client.get("https://example.com/hello?x=1")
+        assertTrue("MockEngine should have seen the request", seen)
+    }
+
+    @Test
+    fun `playLyricInfo request includes qrc trans roma flags`() = runTest {
+        // debug helper replicating parseQqSongIds
+        fun debugParse(songId: String): Pair<String?, Long?> {
+            val parts = songId.split("::", limit = 2)
+            val mid = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+            val numeric = parts.getOrNull(1)?.toLongOrNull()
+            if (numeric != null) return mid to numeric
+            return if (songId.all { it.isDigit() }) null to songId.toLongOrNull() else songId to null
+        }
+        val parsed1 = debugParse("abc123")
+        println("DEBUG parsed abc123 -> $parsed1")
+        assertEquals("abc123" to null, parsed1)
+
+        var seenUrl: String? = null
+        val engine = MockEngine { request ->
+            seenUrl = request.url.toString()
+            respond("{}", HttpStatusCode.OK,
+                headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        LyricsRepository.lastGetQQCall = null
+        // call with id lacking numeric portion to force PlayLyricInfo path
+        repo.getQQMusicLyrics("abc123")
+        assertEquals("abc123", LyricsRepository.lastGetQQCall)
+        assertNotNull(seenUrl)
+        println("DEBUG playLyricInfo flags url: $seenUrl")
+        assertTrue(seenUrl!!.contains("qrc=1"))
+        assertTrue(seenUrl!!.contains("trans=1"))
+        assertTrue(seenUrl!!.contains("roma=1"))
+        // also ensure we used the correct parameter names for songMid/id
+        assertTrue(seenUrl!!.contains("songMid"))
+        assertFalse(seenUrl!!.contains("songMID"))
+    }
+
+    @Test
+    fun `playLyricInfo request uses songMid when no numeric id`() = runTest {
+        fun debugParse(songId: String): Pair<String?, Long?> {
+            val parts = songId.split("::", limit = 2)
+            val mid = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+            val numeric = parts.getOrNull(1)?.toLongOrNull()
+            if (numeric != null) return mid to numeric
+            return if (songId.all { it.isDigit() }) null to songId.toLongOrNull() else songId to null
+        }
+        val parsed2 = debugParse("ZZZmidOnly")
+        println("DEBUG parsed ZZZmidOnly -> $parsed2")
+        assertEquals("ZZZmidOnly" to null, parsed2)
+
+        var seenUrl: String? = null
+        val engine = MockEngine { request ->
+            seenUrl = request.url.toString()
+            respond("{}", HttpStatusCode.OK,
+                headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        LyricsRepository.lastGetQQCall = null
+        repo.getQQMusicLyrics("ZZZmidOnly")
+        assertEquals("ZZZmidOnly", LyricsRepository.lastGetQQCall)
+        assertNotNull(seenUrl)
+        println("DEBUG playLyricInfo mid-only url: $seenUrl")
+        assertTrue(seenUrl!!.contains("songMid=ZZZmidOnly"))
+        // numeric id should be default zero and spelled correctly
+        assertTrue(seenUrl!!.contains("songId=0"))
+        assertFalse(seenUrl!!.contains("songID"))
+    }
+
+    @Test
+    fun `playLyricInfo uses numericId when available`() = runTest {
+        fun debugParse(songId: String): Pair<String?, Long?> {
+            val parts = songId.split("::", limit = 2)
+            val mid = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+            val numeric = parts.getOrNull(1)?.toLongOrNull()
+            if (numeric != null) return mid to numeric
+            return if (songId.all { it.isDigit() }) null to songId.toLongOrNull() else songId to null
+        }
+        val parsed3 = debugParse("12345")
+        println("DEBUG parsed 12345 -> $parsed3")
+        assertEquals(null to 12345L, parsed3)
+
+        var seenUrl: String? = null
+        val engine = MockEngine { request ->
+            seenUrl = request.url.toString()
+            respond("{}", HttpStatusCode.OK,
+                headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+        LyricsRepository.lastGetQQCall = null
+        // supply songMid string that parseQqSongIds returns numeric id for
+        // for test we know parseQqSongIds treats digits-only as numeric
+        repo.getQQMusicLyrics("12345")
+        assertEquals("12345", LyricsRepository.lastGetQQCall)
+        assertNotNull(seenUrl)
+        println("DEBUG playLyricInfo numeric url: $seenUrl")
+        assertTrue(seenUrl!!.contains("songId=12345"))
+        // ensure we used lowercase form; uppercase variants would indicate a bug
+        assertFalse(seenUrl!!.contains("songMID"))
+        assertFalse(seenUrl!!.contains("songID"))
+    }
+
+    @Test
     fun `getAMLL_TTMLLyrics uses platform prefix when provided`() = runTest {
         var seenUrl: String? = null
         val engine = MockEngine { request ->
@@ -166,6 +282,34 @@ class LyricsRepositoryTest {
         val repo = LyricsRepository(client)
         // call using combined hash+proposal
         repo.getKugouLyrics("h123::12345")
+    }
+
+    @Test
+    fun `hex detection fallback to base64 does not crash`() = runTest {
+        // craft a base64 string consisting only of hex characters and even length
+        val bogusBase64 = "48656c6c6f576f726c64" // actually "HelloWorld" in ascii (also valid hex)
+        // encode it in base64 to get real payload
+        val base64 = android.util.Base64.encodeToString(bogusBase64.toByteArray(), android.util.Base64.NO_WRAP)
+        // ensure looksLikeHex would return true on the encoded string
+        assertTrue(QqMusicQrcCrypto.looksLikeHex(base64))
+        // repository should not throw when decoding
+        val engine2 = MockEngine { respond("", HttpStatusCode.OK) }
+        val client2 = HttpClient(engine2 as HttpClientEngine)
+        val repo2 = LyricsRepository(client2)
+        val result = repo2.decodeQqLyricPayload(base64)
+        // result should equal original decoded base64 (which is bogusBase64 string)
+        assertEquals(bogusBase64, result)
+    }
+
+    @Test
+    fun `decrypt real sample hex file`() = runTest {
+        // load encrypted example downloaded from Unilyric repo
+        val hexFile = java.io.File("encrypted.hex")
+        assumeTrue("sample hex file not present, skip", hexFile.exists())
+        val hex = hexFile.readText().trim()
+        assertTrue(hex.isNotEmpty())
+        val decrypted = QqMusicQrcCrypto.decryptQrcHex(hex)
+        assertTrue("decrypted string should not be empty", decrypted.isNotEmpty())
     }
 
 
@@ -273,6 +417,32 @@ class LyricsRepositoryTest {
 
         val features = repo.getLyricsFeatures("amll", "id", "t", "a")
         assertFalse(features.contains(com.amll.droidmate.domain.model.LyricsFeature.WORDS))
+    }
+
+    @Test
+    fun `overlap feature only for amll provider`() = runTest {
+        // create lyrics with overlapping line timings
+        val ttml = """<?xml version=\"1.0\"?>
+<tt xmlns=\"http://www.w3.org/ns/ttml\">
+  <body>
+    <div>
+      <p begin=\"00:00.000\" end=\"00:02.000\">first</p>
+      <p begin=\"00:01.500\" end=\"00:03.000\">second</p>
+    </div>
+  </body>
+</tt>"""
+
+        val engine = MockEngine { _ ->
+            respond(ttml, HttpStatusCode.OK, headers = headersOf("Content-Type" to listOf("text/xml")))
+        }
+        val client = HttpClient(engine as HttpClientEngine)
+        val repo = LyricsRepository(client)
+
+        val featuresAmll = repo.getLyricsFeatures("amll", "id", "t", "a")
+        assertTrue(featuresAmll.contains(com.amll.droidmate.domain.model.LyricsFeature.OVERLAP))
+
+        val featuresOther = repo.getLyricsFeatures("qq", "id", "t", "a")
+        assertFalse(featuresOther.contains(com.amll.droidmate.domain.model.LyricsFeature.OVERLAP))
     }
 
     @Test

@@ -9,10 +9,10 @@ const DYNAMIC_FONT_STYLE_ID = 'amll-dynamic-font-face-style'
 
 const QUALITY_PROFILE = {
   alignAnchor: 'center',
-  // active line will land at 40% of the viewport from top of the *visible area*
+  // active line will land at 25% of the viewport from top of the *visible area*
   // we introduce a half-screen padding above the first line, so the
-  // effective offset needs to be reduced by that amount (40% - 50% = -10%).
-  alignPosition: -0.1,
+  // effective offset needs to be reduced by that amount
+  alignPosition: -0.25,
   enableSpring: true,
   enableScale: true,
   enableBlur: true,
@@ -53,11 +53,33 @@ const TOUCH_BG_BLUR_CLASS = 'amll-touch-unblur'
 // can be marked with `amll-line-unblur` and the rule will remove any
 // blur filter the core library may have applied.
 const UNBLUR_STYLE_ID = 'amll-unblur-style'
+const PAUSE_STYLE_ID = 'amll-pause-style'
+
 function ensureUnblurStyle() {
   if (document.getElementById(UNBLUR_STYLE_ID)) return
   const s = document.createElement('style')
   s.id = UNBLUR_STYLE_ID
   s.textContent = `[class*="_lyricLine_"] .amll-line-unblur, [class*="_lyricLine_"].amll-line-unblur { filter: none !important; }`
+  document.head.appendChild(s)
+}
+
+// pause styling helper (see comment in main.jsx)
+function ensurePauseStyle() {
+  if (document.getElementById(PAUSE_STYLE_ID)) return
+  const s = document.createElement('style')
+  s.id = PAUSE_STYLE_ID
+  s.textContent = `
+/* freeze only the main-line text when paused (ignore duet/background/etc) */
+.amll-lyric-player.amll-paused [class*="_lyricMainLine_"][class*="_active_"] *,
+.amll-lyric-player.amll-paused [class*="_lyricMainLine_"][class*="_active_"] ._romanWord_*,
+.amll-lyric-player.amll-paused [class*="_lyricMainLine_"][class*="_active_"] ._emphasizeWrapper_*,
+/* also prevent any span under the active main line from transforming */
+.amll-lyric-player.amll-paused [class*="_lyricMainLine_"][class*="_active_"] span {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
+  transform: none !important;
+}
+`
   document.head.appendChild(s)
 }
 
@@ -181,6 +203,7 @@ function normalizeLyricLines(lines) {
 const state = {
   lyricLines: [],
   currentTime: 0,
+  isPaused: false, // whether the host reports playback paused
   isSeeking: false,
   blur: {
     enabled: true,
@@ -499,6 +522,11 @@ function animationFrameLoop() {
     const delta = lastFrameTime === -1 ? 0 : now - lastFrameTime
     lastFrameTime = now
 
+    if (state.isPaused) {
+      rafId = window.requestAnimationFrame(animationFrameLoop)
+      return
+    }
+
     settleSeekingIfNeeded(now)
     callPlayer('setCurrentTime', Math.trunc(state.currentTime), state.isSeeking)
     callPlayer('update', delta)
@@ -525,8 +553,9 @@ function mountPlayer() {
     return
   }
 
-  // ensure the CSS rule for unblurring a single line is present
+  // ensure the helper stylesheets we rely on are present
   ensureUnblurStyle()
+  ensurePauseStyle()
 
   // make the outer document scrollable
   document.documentElement.style.overflowY = 'auto'
@@ -543,62 +572,74 @@ function mountPlayer() {
 
     player = new LyricPlayer()
 
-    // patch setLyricLines so we always keep all lines buffered
+    // patch setLyricLines so we always keep all lines buffered. the
+    // library only retains a few hot lines by default which meant that
+    // scrolling could not reach the extremities of a long lyric set. we also
+    // retry asynchronously if `bufferedLines` isn't ready yet.
     const originalSetLyricLines = player.setLyricLines.bind(player)
     player.setLyricLines = function (lines, time = 0) {
       originalSetLyricLines(lines, time)
-      if (this.bufferedLines) {
-        this.bufferedLines.clear()
-        for (let i = 0; i < lines.length; i++) {
-          this.bufferedLines.add(i)
+
+      const bufferAll = () => {
+        if (this.bufferedLines) {
+          this.bufferedLines.clear()
+          for (let i = 0; i < lines.length; i++) {
+            this.bufferedLines.add(i)
+          }
+          this.scrollToIndex = 0
+          this.calcLayout(true)
+        } else {
+          setTimeout(bufferAll, 0)
         }
-        this.scrollToIndex = 0
-        this.calcLayout(true)
       }
+
+      bufferAll()
     }
 
-    // web-flow layout patch
-    player.allowScroll = false
-    const originalCalcLayout = player.calcLayout.bind(player)
-    // keep track of padding we have already applied so we don't repeatedly
-    // add the same amount on each layout pass (which previously caused the
-    // container height to grow to 50k+ after a few frames).
-    // track the previous padding so the added height doesn't accumulate
-    let __lastPadding = 0
-    player.calcLayout = async function (animated = false) {
-      await originalCalcLayout(animated)
+    // default behavior: put lyric player in document flow and allow
+    // natural scrolling. this keeps each line arranged by the core library.
+    player.allowScroll = true
 
-      // add top/bottom padding equal to half the viewport height
-      const pad = this.size[1] * 0.5
-      if (this.element) {
-        this.element.style.boxSizing = 'border-box'
-        this.element.style.paddingTop = pad + 'px'
-        this.element.style.paddingBottom = pad + 'px'
+    // disable internal scroll handling so page scroll is not blocked
+    player.beginScrollHandler = () => false
 
-        // measure the height produced by original layout and strip off the
-        // previous padding to obtain the true content height.
-        const computedHeight = parseFloat(this.element.style.height) || this.element.clientHeight || 0
-        const baseHeight = Math.max(0, computedHeight - __lastPadding * 2)
-        this.element.style.height = baseHeight + pad * 2 + 'px'
-
-        // shift the bottom line accordingly
-        this.bottomLine.setTransform(0, baseHeight + pad, false, 0)
+    // keep original layout logic, but strip out its scrolling helpers and
+    // reset any transforms it applies.
+    const originalCalcLayout2 = player.calcLayout.bind(player)
+    player.calcLayout = async function(animated = false) {
+      await originalCalcLayout2(animated)
+      const sp = document.getElementById('amll-spacer')
+      if (sp && sp.parentElement) sp.parentElement.removeChild(sp)
+      if (this.currentLyricLineObjects) {
+        this.currentLyricLineObjects.forEach(o => {
+          const el = o.getElement()
+          if (el) el.style.transform = ''
+        })
       }
-
-      __lastPadding = pad
+      if (this.element) this.element.style.height = 'auto'
     }
 
     const playerElement = player.getElement()
     applyPlayerStyle(playerElement)
     if (player.allowScroll) {
-      playerElement.style.position = 'absolute'
-      playerElement.style.inset = '0'
-    } else {
       playerElement.style.position = 'relative'
-      playerElement.style.inset = 'auto'
     }
     playerElement.style.zIndex = '1'
     app.appendChild(playerElement)
+
+    // allow the browser to handle vertical panning natively; the fixed
+    // overlay no longer needs to intercept or proxy gestures. touch-action
+    // tells the engine that vertical scrolls are permitted.
+    playerElement.style.touchAction = 'pan-y'
+    let _lastY = null
+    playerElement.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        _lastY = e.touches[0].clientY
+      }
+    }, { passive: true })
+    playerElement.addEventListener('touchend', () => { _lastY = null })
+
+    // wheel events bubble and scroll the page normally without special handling.
 
     logToAndroid(`[AMLL-INIT] Core LyricPlayer created, container width=${app.clientWidth}, height=${app.clientHeight}`)
 
@@ -722,12 +763,71 @@ window.updateAlbumArt = async function (albumUri) {
   }
 }
 
+// see comment in main.jsx for rationale
+function reloadCurrentLine() {
+  if (!player || !Array.isArray(state.lyricLines) || state.lyricLines.length === 0) return
+  const t = Math.trunc(state.currentTime)
+  callPlayer('setLyricLines', state.lyricLines, t)
+  callPlayer('setCurrentTime', t, true)
+  callPlayer('update', 0)
+  logToAndroid(`[AMLL-DEBUG] reloadCurrentLine at ${t}ms`)
+}
+
+window.setPaused = function (paused) {
+  if (paused) {
+    if (!state.isPaused) {
+      state.isPaused = true
+      callPlayer('pause')
+      const el = player?.getElement?.()
+      if (el) el.classList.add('amll-paused')
+      document.documentElement.style.setProperty('--amll-player-time', `${state.currentTime}`)
+    }
+  } else {
+    if (state.isPaused) {
+      state.isPaused = false
+      callPlayer('resume')
+      const el = player?.getElement?.()
+      if (el) el.classList.remove('amll-paused')
+      reloadCurrentLine()
+      document.documentElement.style.removeProperty('--amll-player-time')
+    }
+  }
+}
+
 window.updateTime = function (timeMs) {
   const now = performance.now()
   const parsedTime = Number(timeMs)
+  const prev = state.currentTime
   state.currentTime = Number.isFinite(parsedTime) ? parsedTime : 0
+
+  // pause/resume detection
+  if (state.currentTime === prev) {
+    if (!state.isPaused) {
+      state.isPaused = true
+      callPlayer('pause')
+      logToAndroid('[AMLL-PLAY] detected pause, player paused')
+      const el = player?.getElement?.()
+      if (el) el.classList.add('amll-paused')
+      document.documentElement.style.setProperty('--amll-player-time', `${state.currentTime}`)
+    }
+  } else {
+    if (state.isPaused) {
+      state.isPaused = false
+      callPlayer('resume')
+      logToAndroid('[AMLL-PLAY] playback resumed, player resumed')
+      const el = player?.getElement?.()
+      if (el) el.classList.remove('amll-paused')
+      reloadCurrentLine()
+      document.documentElement.style.removeProperty('--amll-player-time')
+    }
+    if (state.currentTime < prev) {
+      logToAndroid(`[AMLL-PLAY] backward seek (${prev} -> ${state.currentTime}), reloading line`)
+      reloadCurrentLine()
+    }
+  }
+
   updateSeekingStateFromTime(now, state.currentTime)
-}
+}    
 
 window.configureLyricMotion = function (options) {
   if (!options || typeof options !== 'object') return

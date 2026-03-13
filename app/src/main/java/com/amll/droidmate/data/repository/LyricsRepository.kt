@@ -34,6 +34,11 @@ open class LyricsRepository(
     private val httpClient: HttpClient,
     private val cacheRepo: LyricsCacheRepository? = null
 ) {
+    companion object {
+        // for tests: record last songMid passed into getQQMusicLyrics
+        @JvmStatic
+        var lastGetQQCall: String? = null
+    }
     // scope used for background AMLL probes; keeps them independent of caller
     private val amllProbeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -153,6 +158,10 @@ open class LyricsRepository(
      * 从 QQ 音乐获取歌词内容
      */
     open suspend fun getQQMusicLyrics(songMid: String, title: String? = null, artist: String? = null): TTMLLyrics? {
+        println("ENTER getQQMusicLyrics with songMid=$songMid")
+        Timber.d("ENTER getQQMusicLyrics with songMid=%s", songMid)
+        // record for tests
+        lastGetQQCall = songMid
         return try {
             val (mid, numericId) = parseQqSongIds(songMid)
 
@@ -174,12 +183,28 @@ open class LyricsRepository(
                     put("module", "music.musichallSong.PlayLyricInfo")
                     put("method", "GetPlayLyricInfo")
                     putJsonObject("param") {
-                        put("songMID", fallbackMid)
-                        put("songID", 0)
+                        // mimic unilyric.rs: use numeric ID when possible
+                        if (numericId != null) {
+                            put("songId", numericId)
+                            // API actually expects lower-case "songMid"
+                            put("songMid", "")
+                        } else {
+                            put("songMid", fallbackMid)
+                            // when no numeric ID is available the server does not
+                            // care about songId, but keep it for compatibility
+                            put("songId", 0)
+                        }
+                        // request all available lyric tracks (boolean flags)
+                        put("qrc", 1)
+                        put("trans", 1)
+                        put("roma", 1)
                     }
                 }
             }
             
+            // debug: show that we are about to make PlayLyricInfo request
+            Timber.d("PlayLyricInfo request body: $lyricData")
+            println("DEBUG PlayLyricInfo request body: $lyricData")
             val response = httpClient.get("https://u.y.qq.com/cgi-bin/musicu.fcg") {
                 parameter("data", lyricData.toString())
                 parameter("format", "json")
@@ -390,13 +415,21 @@ open class LyricsRepository(
         return regex.find(xml)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
     }
 
-    private fun decodeQqLyricPayload(payload: String): String {
+    internal fun decodeQqLyricPayload(payload: String): String {
         val raw = payload.trim()
-        return if (QqMusicQrcCrypto.looksLikeHex(raw)) {
-            QqMusicQrcCrypto.decryptQrcHex(raw)
-        } else {
-            String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT))
+        // QQ sometimes returns base64 strings that accidentally consist only of hex chars.
+        // Unilyric treats any alphanumeric text as potential hex and tries decryption, falling
+        // back if it fails.  We replicate that behaviour here to avoid crashes when our
+        // simple `looksLikeHex` matches a base64 payload.
+        if (QqMusicQrcCrypto.looksLikeHex(raw)) {
+            try {
+                return QqMusicQrcCrypto.decryptQrcHex(raw)
+            } catch (e: Exception) {
+                Timber.w(e, "QRC hex decrypt failed, falling back to base64")
+                // fall through to base64 decode below
+            }
         }
+        return String(android.util.Base64.decode(raw, android.util.Base64.DEFAULT))
     }
 
     /**
@@ -1853,7 +1886,7 @@ open class LyricsRepository(
             "kugou" -> getKugouLyrics(songId, title, artist)
             else -> null
         }
-        return lyrics?.let { analyzeFeatures(it) } ?: emptySet()
+        return lyrics?.let { analyzeFeatures(it, normalizedProvider) } ?: emptySet()
     }
 
     /**
@@ -1958,7 +1991,15 @@ open class LyricsRepository(
         }).map { it.first }
     }
 
-    private fun analyzeFeatures(lyrics: TTMLLyrics): Set<LyricsFeature> {
+    /**
+     * Scan a TTML lyrics object and return supported features.
+     *
+     * @param lyrics parsed lyrics
+     * @param provider the original source/provider string (lowercase);
+     *   only AMLL TTML DB files are scanned for overlapping lines.  other
+     *   providers may have inaccurate timings and shouldn't be flagged.
+     */
+    private fun analyzeFeatures(lyrics: TTMLLyrics, provider: String? = null): Set<LyricsFeature> {
         val features = mutableSetOf<LyricsFeature>()
         val lines = lyrics.lines
         if (lines.any { it.isDuet }) features.add(LyricsFeature.DUET)
@@ -1981,8 +2022,13 @@ open class LyricsRepository(
             }
         }
         if (hasRealWords) features.add(LyricsFeature.WORDS)
-        if (lines.zipWithNext().any { it.second.startTime < it.first.endTime }) {
-            features.add(LyricsFeature.OVERLAP)
+        // only mark overlap when the source is AMLL TTML DB; other sources
+        // sometimes use optimistic positioning and would trigger false
+        // positives.
+        if (provider?.lowercase() == "amll") {
+            if (lines.zipWithNext().any { it.second.startTime < it.first.endTime }) {
+                features.add(LyricsFeature.OVERLAP)
+            }
         }
         return features
     }
