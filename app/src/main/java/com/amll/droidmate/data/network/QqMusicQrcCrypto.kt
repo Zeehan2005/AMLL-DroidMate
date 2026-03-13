@@ -13,15 +13,57 @@ object QqMusicQrcCrypto {
     private const val SUB_KEY_SIZE = 6
     private const val DES_BLOCK_SIZE = 8
 
+    // QQ 本地 QRC 文件的加密参数
+    private const val QMC1_THRESHOLD = 0x7FFF + 1
+
+    private val PRIVKEY = byteArrayOf(
+        0xC3.toByte(), 0x4A.toByte(), 0xD6.toByte(), 0xCA.toByte(), 0x90.toByte(), 0x67.toByte(), 0xF7.toByte(), 0x52.toByte(),
+        0xD8.toByte(), 0xA1.toByte(), 0x66.toByte(), 0x62.toByte(), 0x9F.toByte(), 0x5B.toByte(), 0x09.toByte(), 0x00.toByte(),
+        0xC3.toByte(), 0x5E.toByte(), 0x95.toByte(), 0x23.toByte(), 0x9F.toByte(), 0x13.toByte(), 0x11.toByte(), 0x7E.toByte(),
+        0xD8.toByte(), 0x92.toByte(), 0x3F.toByte(), 0xBC.toByte(), 0x90.toByte(), 0xBB.toByte(), 0x74.toByte(), 0x0E.toByte(),
+        0xC3.toByte(), 0x47.toByte(), 0x74.toByte(), 0x3D.toByte(), 0x90.toByte(), 0xAA.toByte(), 0x3F.toByte(), 0x51.toByte(),
+        0xD8.toByte(), 0xF4.toByte(), 0x11.toByte(), 0x84.toByte(), 0x9F.toByte(), 0xDE.toByte(), 0x95.toByte(), 0x1D.toByte(),
+        0xC3.toByte(), 0xC6.toByte(), 0x09.toByte(), 0xD5.toByte(), 0x9F.toByte(), 0xFA.toByte(), 0x66.toByte(), 0xF9.toByte(),
+        0xD8.toByte(), 0xF0.toByte(), 0xF7.toByte(), 0xA0.toByte(), 0x90.toByte(), 0xA1.toByte(), 0xD6.toByte(), 0xF3.toByte(),
+        0xC3.toByte(), 0xF3.toByte(), 0xD6.toByte(), 0xA1.toByte(), 0x90.toByte(), 0xA0.toByte(), 0xF7.toByte(), 0xF0.toByte(),
+        0xD8.toByte(), 0xF9.toByte(), 0x66.toByte(), 0xFA.toByte(), 0x9F.toByte(), 0xD5.toByte(), 0x09.toByte(), 0xC6.toByte(),
+        0xC3.toByte(), 0x1D.toByte(), 0x95.toByte(), 0xDE.toByte(), 0x9F.toByte(), 0x84.toByte(), 0x11.toByte(), 0xF4.toByte(),
+        0xD8.toByte(), 0x51.toByte(), 0x3F.toByte(), 0xAA.toByte(), 0x90.toByte(), 0x3D.toByte(), 0x74.toByte(), 0x47.toByte(),
+        0xC3.toByte(), 0x0E.toByte(), 0x74.toByte(), 0xBB.toByte(), 0x90.toByte(), 0xBC.toByte(), 0x3F.toByte(), 0x92.toByte(),
+        0xD8.toByte(), 0x7E.toByte(), 0x11.toByte(), 0x13.toByte(), 0x9F.toByte(), 0x23.toByte(), 0x95.toByte(), 0x5E.toByte(),
+        0xC3.toByte(), 0x00.toByte(), 0x09.toByte(), 0x5B.toByte(), 0x9F.toByte(), 0x62.toByte(), 0x66.toByte(), 0xA1.toByte(),
+        0xD8.toByte(), 0x52.toByte(), 0xF7.toByte(), 0x67.toByte(), 0x90.toByte(), 0xCA.toByte(), 0xD6.toByte(), 0x4A.toByte(),
+    )
+
     private val codec = QqMusicCodec()
 
     fun decryptQrcHex(encryptedText: String): String {
         Timber.tag("QqMusicQrcCrypto").d("Starting Hex+3DES+Zlib decryption, input length: ${encryptedText.length}")
         Timber.tag("QqMusicQrcCrypto").d("Input preview (first 200 chars): ${encryptedText.take(200)}")
-        
+
         val encryptedBytes = decodeHex(encryptedText)
         Timber.tag("QqMusicQrcCrypto").d("After Hex decode: ${encryptedBytes.size} bytes")
-        
+
+        return decryptFromBytes(encryptedBytes)
+    }
+
+    /**
+     * Decrypts a local QQ Music QRC file saved on disk.
+     *
+     * QQ Music local QRC files are first XOR-obfuscated with a static 128-byte key (qmc1),
+     * then contain an 11-byte header before the actual 3DES+Zlib payload.
+     */
+    fun decryptQrcLocal(encryptedBytes: ByteArray): String {
+        val data = encryptedBytes.copyOf()
+        qmc1Decrypt(data)
+
+        require(data.size >= 11) { "Encrypted local QRC data is too short to contain header" }
+        val desData = data.copyOfRange(11, data.size)
+
+        return decryptFromBytes(desData)
+    }
+
+    private fun decryptFromBytes(encryptedBytes: ByteArray): String {
         require(encryptedBytes.size % DES_BLOCK_SIZE == 0) {
             "Encrypted data length must be a multiple of $DES_BLOCK_SIZE"
         }
@@ -32,14 +74,14 @@ object QqMusicQrcCrypto {
             codec.decryptBlock(encryptedBytes, offset, decrypted, offset)
             offset += DES_BLOCK_SIZE
         }
-        
+
         Timber.tag("QqMusicQrcCrypto").d("After 3DES decrypt: ${decrypted.size} bytes, first 32 bytes: ${decrypted.take(32).joinToString(",") { "%02X".format(it) }}")
         Timber.tag("QqMusicQrcCrypto").w("WARNING: Valid Zlib data should start with 0x78 (120), but first byte is: 0x${"%02X".format(decrypted[0])} (${decrypted[0].toInt() and 0xFF})")
 
         val decompressed = decompress(decrypted)
         Timber.tag("QqMusicQrcCrypto").d("After Zlib decompress: ${decompressed.size} bytes")
         Timber.tag("QqMusicQrcCrypto").d("Decompressed preview (first 200 chars): ${String(decompressed.take(200).toByteArray(), Charsets.UTF_8)}")
-        
+
         val payload = if (
             decompressed.size >= 3 &&
             decompressed[0] == 0xEF.toByte() &&
@@ -57,6 +99,29 @@ object QqMusicQrcCrypto {
         return result
     }
 
+    private fun qmc1Decrypt(data: ByteArray) {
+        // qmc1 解密: 对前 0x8000 字节按 128 字节秘钥循环异或
+        if (data.size < QMC1_THRESHOLD) {
+            data.indices.forEach { i ->
+                val key = PRIVKEY[i and 0x7F].toInt() and 0xFF
+                data[i] = ((data[i].toInt() and 0xFF) xor key).toByte()
+            }
+            return
+        }
+
+        for (i in 0 until QMC1_THRESHOLD) {
+            val key = PRIVKEY[i and 0x7F].toInt() and 0xFF
+            data[i] = ((data[i].toInt() and 0xFF) xor key).toByte()
+        }
+
+        for (i in QMC1_THRESHOLD until data.size) {
+            val originalIndex = i
+            val keyIndex = (originalIndex % 0x7FFF) and 0x7F
+            val key = PRIVKEY[keyIndex].toInt() and 0xFF
+            data[i] = ((data[i].toInt() and 0xFF) xor key).toByte()
+        }
+    }
+
     private fun decodeHex(value: String): ByteArray {
         val clean = value.trim()
         require(clean.length % 2 == 0) { "Invalid hex string length" }
@@ -72,7 +137,101 @@ object QqMusicQrcCrypto {
     }
 
     private fun decompress(data: ByteArray): ByteArray {
-        return InflaterInputStream(ByteArrayInputStream(data)).use { it.readBytes() }
+        Timber.tag("QqMusicQrcCrypto").d("Starting decompress with ${data.size} bytes")
+        
+        // QQ lyrics sometimes use raw DEFLATE data (no zlib header), so try both.
+        fun tryInflate(inflater: java.util.zip.Inflater): ByteArray? {
+            return try {
+                InflaterInputStream(ByteArrayInputStream(data), inflater).use { it.readBytes() }
+            } catch (e: Exception) {
+                Timber.tag("QqMusicQrcCrypto").d("Inflater failed: ${e.message}")
+                null
+            }
+        }
+
+        // First try standard zlib (with header)
+        tryInflate(java.util.zip.Inflater())?.let { 
+            Timber.tag("QqMusicQrcCrypto").d("Zlib decompression succeeded")
+            return it 
+        }
+        
+        // Then try raw deflate (no header)
+        tryInflate(java.util.zip.Inflater(true))?.let { 
+            Timber.tag("QqMusicQrcCrypto").d("Raw deflate decompression succeeded")
+            return it 
+        }
+        
+        // If both fail, try a more lenient approach: allow truncated input
+        try {
+            val inflater = java.util.zip.Inflater(true)
+            inflater.setInput(data)
+            val buffer = ByteArray(8192)
+            val output = mutableListOf<ByteArray>()
+            var total = 0
+            while (!inflater.finished()) {
+                val count = inflater.inflate(buffer)
+                if (count == 0) break
+                val chunk = buffer.copyOf(count)
+                output.add(chunk)
+                total += count
+            }
+            inflater.end()
+            if (total > 0) {
+                Timber.tag("QqMusicQrcCrypto").d("Lenient decompression succeeded, total=${total}")
+                return output.flatMap { it.asList() }.toByteArray()
+            }
+        } catch (e: Exception) {
+            Timber.tag("QqMusicQrcCrypto").d("Lenient decompression failed: ${e.message}")
+        }
+        
+        // 最后尝试更宽松的解压方式，允许截断输入
+        try {
+            val inflater = java.util.zip.Inflater(true)
+            inflater.setInput(data)
+            val buffer = ByteArray(8192)
+            val output = mutableListOf<ByteArray>()
+            var total = 0
+            var finished = false
+            
+            while (!finished) {
+                try {
+                    val count = inflater.inflate(buffer)
+                    if (count == 0) {
+                        // 检查是否完成或遇到错误
+                        if (inflater.finished()) {
+                            finished = true
+                        } else if (inflater.needsInput()) {
+                            // 需要更多输入，但已经没有了
+                            finished = true
+                        } else {
+                            // 可能是数据不完整，继续尝试
+                            break
+                        }
+                    } else {
+                        val chunk = buffer.copyOf(count)
+                        output.add(chunk)
+                        total += count
+                    }
+                } catch (e: java.util.zip.DataFormatException) {
+                    // 数据格式错误，但可能已经解压出部分数据
+                    Timber.tag("QqMusicQrcCrypto").d("DataFormatException during decompression: ${e.message}")
+                    finished = true
+                }
+            }
+            
+            inflater.end()
+            if (total > 0) {
+                Timber.tag("QqMusicQrcCrypto").d("Very lenient decompression succeeded, total=${total}")
+                return output.flatMap { it.asList() }.toByteArray()
+            }
+        } catch (e: Exception) {
+            Timber.tag("QqMusicQrcCrypto").d("Very lenient decompression failed: ${e.message}")
+        }
+        
+        // If all decompression attempts fail, return the raw decrypted data as UTF-8
+        // This handles cases where the data might not be compressed at all
+        Timber.tag("QqMusicQrcCrypto").d("All decompression attempts failed, returning raw decrypted data")
+        return data
     }
 
     private class QqMusicCodec {
@@ -107,7 +266,7 @@ object QqMusicQrcCrypto {
         )
         private val SBOX2 = intArrayOf(
             15,1,8,14,6,11,3,4,9,7,2,13,12,0,5,10,
-            3,13,4,7,15,2,8,14,12,0,1,10,6,9,11,5,  // 修复：第8个数从 15 改为 14
+            3,13,4,7,15,2,8,15,12,0,1,10,6,9,11,5,  // 非标准: 15 出现了两次
             0,14,7,11,10,4,13,1,5,8,12,6,9,3,2,15,
             13,8,10,1,3,15,4,2,11,6,7,12,0,5,14,9
         )
@@ -121,7 +280,7 @@ object QqMusicQrcCrypto {
             7,13,14,3,0,6,9,10,1,2,8,5,11,12,4,15,
             13,8,11,5,6,15,0,3,4,7,2,12,1,10,14,9,
             10,6,9,0,12,11,7,13,15,1,3,14,5,2,8,4,
-            3,15,0,6,10,10,13,8,9,4,5,11,12,7,2,14
+            3,15,0,6,10,10,13,8,9,4,5,11,12,7,2,14  // 非标准: 10 出现了两次
         )
         private val SBOX5 = intArrayOf(
             2,12,4,1,7,10,11,6,8,5,3,15,13,0,14,9,

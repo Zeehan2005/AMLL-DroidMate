@@ -196,22 +196,6 @@ function toWordEntries(line) {
       } else {
         logToAndroid(`[BG-LYRICS-DEBUG] First word unchanged after bracket strip: "${originalFirst}"`)
       }
-    }
-
-    // for non-background lyrics, insert spaces between successive words if they
-    // look like Latin/ASCII to avoid English words sticking together
-    if (!line?.isBG && normalized.length > 1) {
-      const hasLatin = normalized.some(w => /[A-Za-z0-9]/.test(w.word))
-      if (hasLatin) {
-        for (let i = 0; i < normalized.length - 1; i++) {
-          const cur = normalized[i]
-          const next = normalized[i + 1]
-          if (!cur.word.endsWith(' ') && !next.word.startsWith(' ')) {
-            cur.word += ' '
-          }
-        }
-      }
-    }
 
       // 去除最后一个词的结尾括号
       const lastWord = normalized[normalized.length - 1]
@@ -681,55 +665,32 @@ function mountPlayer() {
 
     player = new LyricPlayer()
 
-    // ensure every lyric line is buffered so scrolling can reach the very
-    // start/end regardless of playback position. the core library normally
-    // only keeps a few "hot" lines in memory, which caused the behaviour
-    // where only the nearby lines were rendered.
+    // keep every line in the DOM: the library normally prunes off-screen
+    // lines using `bufferedLines`/`hotLines`. by keeping those sets full we
+    // ensure the DOM never loses lines (so scroll can reach start/end).
+    function fillAllLineIndexes() {
+      if (!this.currentLyricLines || !Array.isArray(this.currentLyricLines)) return
+      const len = this.currentLyricLines.length
+      if (!(this.bufferedLines instanceof Set)) this.bufferedLines = new Set()
+      if (!(this.hotLines instanceof Set)) this.hotLines = new Set()
+      this.bufferedLines.clear()
+      this.hotLines.clear()
+      for (let i = 0; i < len; i++) {
+        this.bufferedLines.add(i)
+        this.hotLines.add(i)
+      }
+    }
+
     const originalSetLyricLines = player.setLyricLines.bind(player)
     player.setLyricLines = function (lines, time = 0) {
       originalSetLyricLines(lines, time)
-
-      // ensure every lyric line is buffered so scrolling can reach the very
-      // start/end regardless of playback position. the core library normally
-      // only keeps a few "hot" lines in memory, which caused the behaviour
-      // where only the nearby lines were rendered. we also guard against the
-      // unlikely case where `bufferedLines` hasn't been initialized yet by
-      // retrying on the next tick.
-      const bufferAllLines = () => {
-        if (this.bufferedLines) {
-          this.bufferedLines.clear()
-          for (let i = 0; i < lines.length; i++) {
-            this.bufferedLines.add(i)
-          }
-          // keep scroll index at start so user can immediately scroll upward
-          // and still reach the first line.
-          this.scrollToIndex = 0
-          // also make sure the container actually scrolls to top
-          if (this.element) {
-            this.element.scrollTop = 0
-          }
-          this.calcLayout(true)
-        } else {
-          // try again later; most likely bufferedLines will exist shortly
-          setTimeout(bufferAllLines, 0)
-        }
-      }
-
-      bufferAllLines()
+      fillAllLineIndexes.call(this)
     }
 
-    // keep bufferedLines full whenever currentTime changes; the original
-    // method prunes entries based on position, which caused the scrollable
-    // area to shrink while lyrics were playing.
     const originalSetCurrentTime = player.setCurrentTime.bind(player)
     player.setCurrentTime = function (time, seeking = false) {
       originalSetCurrentTime(time, seeking)
-      if (this.bufferedLines && Array.isArray(this.currentLyricLines)) {
-        this.bufferedLines.clear()
-        for (let i = 0; i < this.currentLyricLines.length; i++) {
-          this.bufferedLines.add(i)
-        }
-      }
+      fillAllLineIndexes.call(this)
     }
 
     // revert to default scrolling behaviour: keep players lines in DOM flow
@@ -769,7 +730,10 @@ function mountPlayer() {
             el.style.transform = ''
           })
         }
-        this.scrollBoundary[1] = max
+        // don't attempt to set scrollBoundary[1] to an undefined helper value.
+        // the core library manages this internally and we just want to keep the
+        // DOM in flow rather than rely on its boundary tracking.
+        // this.scrollBoundary[1] = max
         // if the library is not currently tracking a user scroll, allow it
         // to drive the scrollTop; otherwise leave the native position alone
         if (!this.isScrolled) {
@@ -778,7 +742,6 @@ function mountPlayer() {
           // keep offset in sync with what the user has done
           this.scrollOffset = this.element.scrollTop
         }
-      }
     }
 
     const playerElement = player.getElement()
@@ -961,25 +924,6 @@ window.updateLyrics = function (lyricsPayload) {
       let currentTimeToUse = Math.trunc(state.currentTime)
       logToAndroid(`[AMLL-INFO] Updating lyrics with currentTime=${currentTimeToUse}ms`)
 
-      // when paused we may be sitting in the gap between two lines; calling
-      // setLyricLines with that timestamp caused the library to wipe the DOM
-      // (no active line), so pick a safe nearby time instead. if we're before
-      // the first line also jump to the first lyric so the user isn't staring at
-      // an empty screen while playback is paused at the very start.
-      if (state.isPaused && Array.isArray(state.lyricLines) && state.lyricLines.length > 0) {
-        const inRange = state.lyricLines.find(l => l.startTime <= currentTimeToUse && currentTimeToUse < l.endTime)
-        if (!inRange) {
-          const prevIdx = state.lyricLines.map(l => l.startTime).findIndex(s => s > currentTimeToUse) - 1
-          if (prevIdx >= 0) {
-            currentTimeToUse = state.lyricLines[prevIdx].startTime
-            logToAndroid(`[AMLL-DEBUG] paused gap adjusted time to previous line at ${currentTimeToUse}ms`)
-          } else {
-            // no previous line – we're before the first lyric
-            currentTimeToUse = state.lyricLines[0].startTime
-            logToAndroid(`[AMLL-DEBUG] paused gap before first line, shifting time to ${currentTimeToUse}ms`)
-          }
-        }
-      }
 
       callPlayer('setLyricLines', state.lyricLines, currentTimeToUse)
       callPlayer('setCurrentTime', currentTimeToUse, true)

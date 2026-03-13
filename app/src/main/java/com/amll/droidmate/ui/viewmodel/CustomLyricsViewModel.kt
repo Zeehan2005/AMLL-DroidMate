@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
 import timber.log.Timber
 
 data class CustomLyricsCandidate(
@@ -40,8 +41,8 @@ data class CustomLyricsCandidate(
 
 class CustomLyricsViewModel @JvmOverloads constructor(
     application: Application,
-    private val lyricsRepository: LyricsRepository = ServiceLocator.provideLyricsRepository(application.applicationContext),
-    private val lyricsCacheRepository: LyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application.applicationContext)
+    private val lyricsRepository: LyricsRepository = ServiceLocator.provideLyricsRepository(application),
+    private val lyricsCacheRepository: LyricsCacheRepository = ServiceLocator.provideLyricsCacheRepository(application)
 ) : AndroidViewModel(application) {
 
     // 当前歌曲唯一标识（title + artist）
@@ -62,7 +63,7 @@ class CustomLyricsViewModel @JvmOverloads constructor(
     )
 
     // HTTP client from ServiceLocator (can be overridden in tests)
-    private val httpClient = ServiceLocator.provideHttpClient(application.applicationContext)
+    private val httpClient = ServiceLocator.provideHttpClient(application)
 
     // 当前正在播放的来源名称
     private var currentSourceName: String? = null

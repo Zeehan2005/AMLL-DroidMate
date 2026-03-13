@@ -26,8 +26,13 @@ object HttpClientFactory {
      * @return 配置好的 HttpClient 实例
      */
     fun create(context: Context): HttpClient {
-        // 创建缓存目录（在 Android cache 路径下）
-        val cacheDir = File(context.cacheDir, CACHE_DIR_NAME)
+        // 创建缓存目录（在 Android cache 路径下）。
+        // In unit tests, Context.cacheDir is not mocked, so fall back to a temp dir.
+        val cacheDir = try {
+            File(context.cacheDir, CACHE_DIR_NAME)
+        } catch (e: Exception) {
+            File(System.getProperty("java.io.tmpdir"), CACHE_DIR_NAME)
+        }
         if (!cacheDir.exists()) {
             cacheDir.mkdirs()
         }

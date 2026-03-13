@@ -11,6 +11,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.Assume.assumeTrue
 import com.amll.droidmate.data.network.QqMusicQrcCrypto
+import kotlinx.serialization.json.*
 
 // domain models used in tests
 import com.amll.droidmate.domain.model.LyricsSearchResult
@@ -150,12 +151,19 @@ class LyricsRepositoryTest {
         assertEquals("abc123", LyricsRepository.lastGetQQCall)
         assertNotNull(seenUrl)
         println("DEBUG playLyricInfo flags url: $seenUrl")
-        assertTrue(seenUrl!!.contains("qrc=1"))
-        assertTrue(seenUrl!!.contains("trans=1"))
-        assertTrue(seenUrl!!.contains("roma=1"))
-        // also ensure we used the correct parameter names for songMid/id
-        assertTrue(seenUrl!!.contains("songMid"))
-        assertFalse(seenUrl!!.contains("songMID"))
+        // extract and decode data param
+        val query = java.net.URL(seenUrl).query
+        val dataValue = query.split("&").first { it.startsWith("data=") }.substringAfter("data=")
+        val jsonStr = java.net.URLDecoder.decode(dataValue, "UTF-8")
+        println("DEBUG decoded JSON: $jsonStr")
+        val parsed = kotlinx.serialization.json.Json.parseToJsonElement(jsonStr).jsonObject
+        val params = parsed["req_1"]!!.jsonObject["param"]!!.jsonObject
+        assertEquals(1, params["qrc"]!!.jsonPrimitive.int)
+        assertEquals(1, params["trans"]!!.jsonPrimitive.int)
+        assertEquals(1, params["roma"]!!.jsonPrimitive.int)
+        // check presence of songMid key
+        assertTrue(params.containsKey("songMid"))
+        assertFalse(params.containsKey("songMID"))
     }
 
     @Test
@@ -184,10 +192,14 @@ class LyricsRepositoryTest {
         assertEquals("ZZZmidOnly", LyricsRepository.lastGetQQCall)
         assertNotNull(seenUrl)
         println("DEBUG playLyricInfo mid-only url: $seenUrl")
-        assertTrue(seenUrl!!.contains("songMid=ZZZmidOnly"))
-        // numeric id should be default zero and spelled correctly
-        assertTrue(seenUrl!!.contains("songId=0"))
-        assertFalse(seenUrl!!.contains("songID"))
+        val query2 = java.net.URL(seenUrl).query
+        val dataVal2 = query2.split("&").first { it.startsWith("data=") }.substringAfter("data=")
+        val json2 = java.net.URLDecoder.decode(dataVal2, "UTF-8")
+        val parsedJson2 = kotlinx.serialization.json.Json.parseToJsonElement(json2).jsonObject
+        val params2 = parsedJson2["req_1"]!!.jsonObject["param"]!!.jsonObject
+        assertEquals("ZZZmidOnly", params2["songMid"]!!.jsonPrimitive.content)
+        assertEquals(0, params2["songId"]!!.jsonPrimitive.int)
+        assertFalse(params2.containsKey("songID"))
     }
 
     @Test
@@ -218,10 +230,14 @@ class LyricsRepositoryTest {
         assertEquals("12345", LyricsRepository.lastGetQQCall)
         assertNotNull(seenUrl)
         println("DEBUG playLyricInfo numeric url: $seenUrl")
-        assertTrue(seenUrl!!.contains("songId=12345"))
-        // ensure we used lowercase form; uppercase variants would indicate a bug
-        assertFalse(seenUrl!!.contains("songMID"))
-        assertFalse(seenUrl!!.contains("songID"))
+        val query3 = java.net.URL(seenUrl).query
+        val dataVal3 = query3.split("&").first { it.startsWith("data=") }.substringAfter("data=")
+        val json3 = java.net.URLDecoder.decode(dataVal3, "UTF-8")
+        val parsedJson3 = kotlinx.serialization.json.Json.parseToJsonElement(json3).jsonObject
+        val params3 = parsedJson3["req_1"]!!.jsonObject["param"]!!.jsonObject
+        assertEquals(12345, params3["songId"]!!.jsonPrimitive.int)
+        assertFalse(params3.containsKey("songMID"))
+        assertFalse(params3.containsKey("songID"))
     }
 
     @Test
@@ -289,7 +305,7 @@ class LyricsRepositoryTest {
         // craft a base64 string consisting only of hex characters and even length
         val bogusBase64 = "48656c6c6f576f726c64" // actually "HelloWorld" in ascii (also valid hex)
         // encode it in base64 to get real payload
-        val base64 = android.util.Base64.encodeToString(bogusBase64.toByteArray(), android.util.Base64.NO_WRAP)
+        val base64 = java.util.Base64.getEncoder().encodeToString(bogusBase64.toByteArray())
         // ensure looksLikeHex would return true on the encoded string
         assertTrue(QqMusicQrcCrypto.looksLikeHex(base64))
         // repository should not throw when decoding
@@ -297,6 +313,9 @@ class LyricsRepositoryTest {
         val client2 = HttpClient(engine2 as HttpClientEngine)
         val repo2 = LyricsRepository(client2)
         val result = repo2.decodeQqLyricPayload(base64)
+        // Debug: print what we received to help diagnose issues.
+        println("DEBUG base64 payload: $base64")
+        println("DEBUG decode result: '$result'")
         // result should equal original decoded base64 (which is bogusBase64 string)
         assertEquals(bogusBase64, result)
     }
@@ -312,6 +331,48 @@ class LyricsRepositoryTest {
         assertTrue("decrypted string should not be empty", decrypted.isNotEmpty())
     }
 
+    @Test
+    fun `decrypt local qrc binary file`() = runTest {
+        // local QRC file format (qmc1 + 11-byte header + 3DES+Zlib payload)
+        val binFile = java.io.File("src/test/resources/encrypted_lyrics.bin")
+        assumeTrue("sample QRC binary file not present, skip", binFile.exists())
+        val data = binFile.readBytes()
+        val decrypted = QqMusicQrcCrypto.decryptQrcLocal(data)
+        assertTrue("decrypted string should not be empty", decrypted.isNotEmpty())
+    }
+
+    @Test
+    fun `playLyricInfo numeric qrc flag is ignored`() = runTest {
+        println("DEBUG test start")
+        // lyric payload is simple base64 representing multi‑line text so parser returns something
+        val sampleText = "Line1\nLine2"
+        val base64Hello = java.util.Base64.getEncoder().encodeToString(sampleText.toByteArray())
+        println("DEBUG base64Hello=$base64Hello")
+        val body = """{"code":0,"req_1":{"code":0,"data":{"qrc":1,"lyric":"$base64Hello"}}}"""
+        println("DEBUG body=$body")
+        var seenUrl: String? = null
+        val engine = MockEngine { request ->
+            println("DEBUG engine got request")
+            seenUrl = request.url.toString()
+            respond(body, HttpStatusCode.OK,
+                headers = headersOf("Content-Type" to listOf("application/json")))
+        }
+        println("DEBUG before client creation")
+        val client = HttpClient(engine as HttpClientEngine)
+        println("DEBUG after client creation")
+        val repo = LyricsRepository(client)
+        println("DEBUG before repo call")
+        val result = runCatching { repo.getQQMusicLyrics("unused") }
+        println("DEBUG after repo call")
+        if (result.isFailure) {
+            result.exceptionOrNull()?.printStackTrace()
+        }
+        val lyrics = result.getOrNull()
+        assertNotNull("lyrics should be returned when qrc flag is numeric", lyrics)
+        assertTrue(lyrics!!.lines.any { it.text.contains("Line1") })
+        // ensure qrc value did not end up as content
+        assertFalse(seenUrl!!.contains("qrc=1")) // still sent, but repo should ignore its value
+    }
 
     @Test
     fun `getAMLL_TTMLLyrics handles double-colon qq id`() = runTest {

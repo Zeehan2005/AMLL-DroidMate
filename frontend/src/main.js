@@ -523,6 +523,13 @@ function animationFrameLoop() {
     lastFrameTime = now
 
     if (state.isPaused) {
+      // keep the player rendering the current line even while paused.
+      // this ensures lyrics remain visible / updated when the host pauses
+      // playback and may still send new lyrics data.
+      // Note: passing `isSeek=true` causes the core player to disable/enable
+      // lyric line objects, which can pause their internal animations.
+      callPlayer('setCurrentTime', Math.trunc(state.currentTime), false)
+      callPlayer('update', 0)
       rafId = window.requestAnimationFrame(animationFrameLoop)
       return
     }
@@ -572,28 +579,32 @@ function mountPlayer() {
 
     player = new LyricPlayer()
 
-    // patch setLyricLines so we always keep all lines buffered. the
-    // library only retains a few hot lines by default which meant that
-    // scrolling could not reach the extremities of a long lyric set. we also
-    // retry asynchronously if `bufferedLines` isn't ready yet.
+    // keep every line in the DOM: the library normally prunes off-screen
+    // lines using `bufferedLines`/`hotLines`. by keeping those sets full we
+    // ensure the DOM never loses lines (so scroll can reach start/end).
+    function fillAllLineIndexes() {
+      if (!this.currentLyricLines || !Array.isArray(this.currentLyricLines)) return
+      const len = this.currentLyricLines.length
+      if (!(this.bufferedLines instanceof Set)) this.bufferedLines = new Set()
+      if (!(this.hotLines instanceof Set)) this.hotLines = new Set()
+      this.bufferedLines.clear()
+      this.hotLines.clear()
+      for (let i = 0; i < len; i++) {
+        this.bufferedLines.add(i)
+        this.hotLines.add(i)
+      }
+    }
+
     const originalSetLyricLines = player.setLyricLines.bind(player)
     player.setLyricLines = function (lines, time = 0) {
       originalSetLyricLines(lines, time)
+      fillAllLineIndexes.call(this)
+    }
 
-      const bufferAll = () => {
-        if (this.bufferedLines) {
-          this.bufferedLines.clear()
-          for (let i = 0; i < lines.length; i++) {
-            this.bufferedLines.add(i)
-          }
-          this.scrollToIndex = 0
-          this.calcLayout(true)
-        } else {
-          setTimeout(bufferAll, 0)
-        }
-      }
-
-      bufferAll()
+    const originalSetCurrentTime = player.setCurrentTime.bind(player)
+    player.setCurrentTime = function (time, seeking = false) {
+      originalSetCurrentTime(time, seeking)
+      fillAllLineIndexes.call(this)
     }
 
     // default behavior: put lyric player in document flow and allow
@@ -777,7 +788,7 @@ window.setPaused = function (paused) {
   if (paused) {
     if (!state.isPaused) {
       state.isPaused = true
-      callPlayer('pause')
+      // Keep the core player running; we freeze visuals via CSS instead.
       const el = player?.getElement?.()
       if (el) el.classList.add('amll-paused')
       document.documentElement.style.setProperty('--amll-player-time', `${state.currentTime}`)
@@ -785,7 +796,6 @@ window.setPaused = function (paused) {
   } else {
     if (state.isPaused) {
       state.isPaused = false
-      callPlayer('resume')
       const el = player?.getElement?.()
       if (el) el.classList.remove('amll-paused')
       reloadCurrentLine()
@@ -804,8 +814,7 @@ window.updateTime = function (timeMs) {
   if (state.currentTime === prev) {
     if (!state.isPaused) {
       state.isPaused = true
-      callPlayer('pause')
-      logToAndroid('[AMLL-PLAY] detected pause, player paused')
+      logToAndroid('[AMLL-PLAY] detected pause, player paused (render loop continues)')
       const el = player?.getElement?.()
       if (el) el.classList.add('amll-paused')
       document.documentElement.style.setProperty('--amll-player-time', `${state.currentTime}`)
@@ -813,7 +822,6 @@ window.updateTime = function (timeMs) {
   } else {
     if (state.isPaused) {
       state.isPaused = false
-      callPlayer('resume')
       logToAndroid('[AMLL-PLAY] playback resumed, player resumed')
       const el = player?.getElement?.()
       if (el) el.classList.remove('amll-paused')

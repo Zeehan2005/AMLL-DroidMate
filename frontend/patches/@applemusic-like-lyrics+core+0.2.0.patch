@@ -1,0 +1,30 @@
+diff --git a/node_modules/@applemusic-like-lyrics/core/dist/amll-core.js b/node_modules/@applemusic-like-lyrics/core/dist/amll-core.js
+index f7a46a8..79d3aad 100644
+--- a/node_modules/@applemusic-like-lyrics/core/dist/amll-core.js
++++ b/node_modules/@applemusic-like-lyrics/core/dist/amll-core.js
+@@ -6471,8 +6471,10 @@ class ai extends Rt {
+   }
+   pause() {
+     super.pause(), this.element.classList.remove("playing"), this.interludeDots.pause();
+-    for (const t of this.currentLyricLineObjects)
+-      t.pause();
++    // Keep lyric line objects enabled so their DOM elements remain present even when paused.
++    // The surrounding CSS (e.g. .amll-paused) already freezes animations.
++    // for (const t of this.currentLyricLineObjects)
++    //   t.pause();
+   }
+   resume() {
+     super.resume(), this.element.classList.add("playing"), this.interludeDots.resume();
+@@ -7352,8 +7354,10 @@ class ci extends Rt {
+   }
+   pause() {
+     super.pause(), this.interludeDots.pause();
+-    for (const t of this.currentLyricLineObjects)
+-      t.pause();
++    // Keep lyric line objects enabled so their DOM elements remain present even when paused.
++    // The surrounding CSS (e.g. .amll-paused) already freezes animations.
++    // for (const t of this.currentLyricLineObjects)
++    //   t.pause();
+   }
+   resume() {
+     super.resume(), this.interludeDots.resume();

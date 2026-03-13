@@ -3,7 +3,11 @@ package com.amll.droidmate.ui.viewmodel
 import android.app.Application
 import com.amll.droidmate.data.parser.LyricsFormat
 import com.amll.droidmate.data.repository.LyricsCacheRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Before
@@ -26,14 +30,16 @@ import kotlinx.coroutines.test.advanceUntilIdle
  * calling to make sure the state flow has been updated.
  */
 class CustomLyricsViewModelTest {
+    private val testDispatcher = StandardTestDispatcher()
+
     @Before
     fun setUp() {
-        // no-op
+        Dispatchers.setMain(testDispatcher)
     }
 
     @After
     fun tearDown() {
-        // no-op
+        Dispatchers.resetMain()
     }
 
     @Test
@@ -97,9 +103,7 @@ class CustomLyricsViewModelTest {
             features = setOf(com.amll.droidmate.domain.model.LyricsFeature.TRANSLATION)
         )
         // when inserted separately comparator will reorder
-        runTest {
-            viewModel.searchCandidates("", "") // no-op but ensures flows initialized
-        }
+        viewModel.searchCandidates("", "") // no-op but ensures flows initialized
         // directly test comparator
         val sorted = listOf(c1, c2).sortedWith(viewModel.candidateComparator)
         assertEquals(c2, sorted.first())
