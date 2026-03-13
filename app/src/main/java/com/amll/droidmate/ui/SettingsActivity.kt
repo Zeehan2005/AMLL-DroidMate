@@ -3,10 +3,10 @@ package com.amll.droidmate.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,6 +51,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.SwitchDefaults
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.amll.droidmate.ui.theme.DroidMateTheme
@@ -96,6 +97,13 @@ private fun SettingsPage(
     onOpenNotificationSettings: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // use the global dynamic color scheme as the source of truth for accent
+    val dynamicColorScheme by DynamicThemeManager.observeColorScheme()
+    val rippleColor = dynamicColorScheme?.primary ?: MaterialTheme.colorScheme.primary
+
+    // we no longer need MainViewModel or album art extraction here; that work
+    // is already performed in MainActivity and pushed to DynamicThemeManager
 
     var selectedAction by remember { mutableStateOf(AppSettings.getCardClickAction(context)) }
     var lyricNotificationEnabled by remember { mutableStateOf(AppSettings.isLyricNotificationEnabled(context)) }
@@ -144,7 +152,8 @@ private fun SettingsPage(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                // ensure the card stands out in light theme as well
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(
                     modifier = Modifier
@@ -176,7 +185,13 @@ private fun SettingsPage(
                                     AppSettings.setLyricNotificationEnabled(context, true)
                                 }
                             }
-                        }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = rippleColor,
+                            checkedTrackColor = rippleColor.copy(alpha = 0.5f),
+                            uncheckedThumbColor = rippleColor.copy(alpha = 0.3f),
+                            uncheckedTrackColor = rippleColor.copy(alpha = 0.3f)
+                        )
                     )
                 }
             }
@@ -187,7 +202,7 @@ private fun SettingsPage(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -239,7 +254,7 @@ private fun SettingsPage(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(
                     modifier = Modifier
@@ -261,7 +276,13 @@ private fun SettingsPage(
                         onCheckedChange = { enabled ->
                             skipPreviousRewinds = enabled
                             AppSettings.setSkipPreviousRewindsEnabled(context, enabled)
-                        }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = rippleColor,
+                            checkedTrackColor = rippleColor.copy(alpha = 0.5f),
+                            uncheckedThumbColor = rippleColor.copy(alpha = 0.3f),
+                            uncheckedTrackColor = rippleColor.copy(alpha = 0.3f)
+                        )
                     )
                 }
             }
@@ -276,7 +297,7 @@ private fun SettingsPage(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -301,7 +322,13 @@ private fun SettingsPage(
                             onCheckedChange = { enabled ->
                                 autoCheckEnabled = enabled
                                 AppSettings.setAutoUpdateCheckEnabled(context, enabled)
-                            }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = rippleColor,
+                                checkedTrackColor = rippleColor.copy(alpha = 0.5f),
+                                uncheckedThumbColor = rippleColor.copy(alpha = 0.3f),
+                                uncheckedTrackColor = rippleColor.copy(alpha = 0.3f)
+                            )
                         )
                     }
 
@@ -392,7 +419,7 @@ private fun SettingsPage(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(
                     modifier = Modifier.padding(8.dp),
