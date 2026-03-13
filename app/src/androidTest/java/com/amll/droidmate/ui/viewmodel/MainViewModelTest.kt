@@ -144,6 +144,38 @@ class MainViewModelTest {
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
+    fun fetchLyrics_clearsExistingLyrics() = runTest {
+        // pre-populate lyrics to simulate existing data
+        viewModel._lyrics.value = sampleLyrics()
+
+        // fake repository that delays to allow checking intermediate state
+        val fakeRepo = object : LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) } as HttpClientEngine)) {
+            override suspend fun fetchLyricsAuto(
+                title: String,
+                artist: String,
+                currentSourceName: String?
+            ): LyricsResult {
+                kotlinx.coroutines.delay(1000)
+                return LyricsResult(isSuccess = false)
+            }
+        }
+        viewModel.lyricsRepository = fakeRepo
+        val playing = NowPlayingMusic(
+            title = "t", artist = "a", packageName = "com.example.app",
+            currentPosition = 0, isPlaying = true
+        )
+        viewModel._nowPlayingMusic.value = playing
+
+        viewModel.fetchLyrics()
+        // immediate effect should clear lyrics before network work begins
+        assertNull(viewModel._lyrics.value)
+
+        // advance time to finish coroutine and avoid leaks
+        advanceUntilIdle()
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
     fun fetchLyrics_packageNameBias() = runTest {
         val captured = mutableListOf<String?>()
         val fakeRepo = object : LyricsRepository(HttpClient(MockEngine { respond("", HttpStatusCode.OK) } as HttpClientEngine)) {

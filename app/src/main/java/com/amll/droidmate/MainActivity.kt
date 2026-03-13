@@ -25,8 +25,16 @@ import com.amll.droidmate.ui.screens.MainScreen
 import com.amll.droidmate.ui.viewmodel.MainViewModel
 import timber.log.Timber
 
+// extension function for splash screen support
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // installSplashScreen must be called before super.onCreate to take effect
+        val splash = installSplashScreen()
+        // keep it for the shortest possible time – we'll let Compose render the first frame
+        splash.setKeepOnScreenCondition { false }
+
         super.onCreate(savedInstanceState)
         
         // 启用沉浸式状态栏

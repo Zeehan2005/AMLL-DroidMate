@@ -66,6 +66,9 @@ dependencies {
 
     // AndroidX
     implementation("androidx.core:core-ktx:1.18.0")
+    // 1.1.0 never reached a final release; pick a published version
+    // (1.2.0 is the latest stable as of this writing)
+    implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.activity:activity-compose:1.13.0")
@@ -111,6 +114,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("io.ktor:ktor-client-mock:3.4.1")
     testImplementation("io.ktor:ktor-client-mock-jvm:3.4.1")
+    // make the mock engine available to instrumented Android tests as well
+    androidTestImplementation("io.ktor:ktor-client-mock:3.4.1")
+    androidTestImplementation("io.ktor:ktor-client-mock-jvm:3.4.1")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

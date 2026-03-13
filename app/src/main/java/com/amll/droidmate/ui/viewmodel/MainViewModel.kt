@@ -163,11 +163,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _nowPlayingMusic.value = music
                 Timber.d("Now playing: ${music?.title} - ${music?.artist}")
                 
-                // 如果歌曲确实改变且有有效的歌曲信息，先清除旧歌词并尝试使用缓存
+                // 如果歌曲确实改变且有有效的歌曲信息，先尝试使用缓存，只有在缓存不可用时才清空并搜索
                 if (isMusicChanged && music != null) {
-                    // 清空上一首歌曲的歌词，以便 UI 可以在新的歌词加载期间显示加载动画
-                    _lyrics.value = null
-
                     // 兼容老旧酷狗缓存需要刷新空格的问题
                     val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
                     if (cached != null) {
@@ -185,6 +182,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
 
+                    // 没有可用缓存时再清空并执行网络请求，以避免闪烁的遮罩
+                    _lyrics.value = null
                     Timber.i("Music changed, auto-fetching lyrics...")
                     fetchLyrics()
                 }
@@ -206,22 +205,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _errorMessage.value = "未检测到播放信息"
             return
         }
-        
-        viewModelScope.launch {
-            _isLoading.value = true
-            _errorMessage.value = null
-            
-            try {
-                Timber.i("Fetching lyrics for: ${music.title} - ${music.artist}")
 
-                val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
-                if (cached != null) {
-                    // 兼容修复前的酷狗缓存：旧数据可能已经丢失英文词间空格，需强制走一次在线刷新。
-                    val shouldBypassCache = cached.source.contains("kugou", ignoreCase = true) ||
-                        cached.source.contains("酷狗")
-                    if (shouldBypassCache) {
-                        Timber.d("Bypassing stale Kugou cache to refresh whitespace-fixed lyrics")
-                    } else {
+        viewModelScope.launch {
+            _errorMessage.value = null
+
+            // first try to load from cache without toggling the loading flag; this avoids
+            // showing a spinner/mask for cached data which is usually very fast.
+            val cached = lyricsCacheRepository.findBySong(music.title, music.artist)
+            if (cached != null) {
+                val shouldBypassCache = cached.source.contains("kugou", ignoreCase = true) ||
+                    cached.source.contains("酷狗")
+                if (!shouldBypassCache) {
                     val parsed = LyricsRepository.parseTTML(cached.ttmlContent)
                     if (parsed != null) {
                         _lyrics.value = parsed
@@ -229,17 +223,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         Timber.d("Loaded lyrics from cache: ${cached.title} - ${cached.artist} (${cached.source})")
                         return@launch
                     }
-                    }
+                } else {
+                    Timber.d("Bypassing stale Kugou cache to refresh whitespace-fixed lyrics")
                 }
-                
-                // 使用智能多源搜索，向仓库提供当前播放源名称以便打分
+            }
+
+            // no usable cache, fall back to network search
+            _lyrics.value = null
+            _isLoading.value = true
+
+            try {
+                Timber.i("Fetching lyrics for: ${music.title} - ${music.artist}")
+
                 val sourceName = getAppNameFromPackage(context, music.packageName)
                 val result = lyricsRepository.fetchLyricsAuto(
                     title = music.title,
                     artist = music.artist,
                     currentSourceName = sourceName
                 )
-                
+
                 if (result.isSuccess && result.lyrics != null) {
                     _lyrics.value = result.lyrics
                     lyricsCacheRepository.upsert(
