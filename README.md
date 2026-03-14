@@ -1,7 +1,7 @@
 
 # AMLL DroidMate
 
-傻瓜式 Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
+即开即用 Android 端外置歌词显示器，集成 [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) 风格渲染与多源歌词检索能力。
 
 <img src="https://github.com/user-attachments/assets/8921a8a3-6c19-4641-b633-89c8f2b11985" width="500">
 
