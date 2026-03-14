@@ -45,7 +45,8 @@ object UnifiedLyricsParser {
         content: String,
         title: String = "Unknown",
         artist: String = "Unknown",
-        album: String? = null
+        album: String? = null,
+        processMetadata: Boolean = true
     ): TTMLLyrics? {
         if (content.isBlank()) {
             Timber.w("Empty lyrics content")
@@ -115,11 +116,21 @@ object UnifiedLyricsParser {
                 return null
             }
             
+            // 抛弃可能前/后端的元数据行（例如：词：..., 作曲：...）
+            val cleanedLines = if (processMetadata) {
+                MetadataStripper.stripMetadataLines(lines)
+            } else {
+                lines
+            }
+
+            // 识别演唱者标记（A: XX），用于填充 agent/isDuet 信息
+            val annotatedLines = AgentRecognizer.recognizeAgents(cleanedLines)
+
             // 构建 TTMLLyrics 对象
-            val sortedLines = lines.sortedBy { it.startTime }
+            val sortedLines = annotatedLines.sortedBy { it.startTime }
             val duration = sortedLines.lastOrNull()?.endTime ?: 0L
             Timber.d("[BG-LYRICS-DEBUG] Unified final sorted summary: total=${sortedLines.size}, ${summarizeBgLines(sortedLines)}")
-            
+
             TTMLLyrics(
                 metadata = TTMLMetadata(
                     title = title,

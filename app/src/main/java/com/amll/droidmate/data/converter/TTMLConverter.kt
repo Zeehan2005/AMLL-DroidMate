@@ -240,15 +240,17 @@ object TTMLConverter {
     fun fromLyrics(
         content: String,
         title: String = "Unknown",
-        artist: String = "Unknown", 
-        album: String? = null
+        artist: String = "Unknown",
+        album: String? = null,
+        processMetadata: Boolean = true
     ): TTMLLyrics? {
         return try {
             com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                 content = content,
                 title = title,
                 artist = artist,
-                album = album
+                album = album,
+                processMetadata = processMetadata
             )
         } catch (e: Exception) {
             Timber.e(e, "Error parsing lyrics using Unilyric rules")

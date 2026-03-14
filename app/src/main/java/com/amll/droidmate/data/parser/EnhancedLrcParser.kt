@@ -153,7 +153,7 @@ object EnhancedLrcParser {
             }
         }
         
-        val lineEndMs = words.lastOrNull()?.endTime ?: (lineStartMs + 2000)
+        val lineEndMs = words.lastOrNull()?.startTime ?: (lineStartMs + 2000)
         
         return LyricLine(
             startTime = lineStartMs,

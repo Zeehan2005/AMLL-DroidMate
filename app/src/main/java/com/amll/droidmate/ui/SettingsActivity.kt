@@ -110,6 +110,7 @@ private fun SettingsPage(
     var autoCheckEnabled by remember { mutableStateOf(AppSettings.isAutoUpdateCheckEnabled(context)) }
     var updateChannel by remember { mutableStateOf(AppSettings.getUpdateChannel(context)) }
     var skipPreviousRewinds by remember { mutableStateOf(AppSettings.isSkipPreviousRewindsEnabled(context)) }
+    var processMetadataEnabled by remember { mutableStateOf(AppSettings.isMetadataProcessingEnabled(context)) }
     var updateDialogTitle by remember { mutableStateOf("") }
     var updateDialogMessage by remember { mutableStateOf("") }
     var updateDialogUrl by remember { mutableStateOf<String?>(null) }
@@ -287,8 +288,40 @@ private fun SettingsPage(
                 }
             }
 
-
-            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth(0.75f)) {
+                        Text("处理元数据（实验性）")
+                        Text(
+                            text = "尝试自动移除歌词中的词/曲/编曲等元数据行，可能会误删。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                    Switch(
+                        checked = processMetadataEnabled,
+                        onCheckedChange = { enabled ->
+                            processMetadataEnabled = enabled
+                            AppSettings.setMetadataProcessingEnabled(context, enabled)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = rippleColor,
+                            checkedTrackColor = rippleColor.copy(alpha = 0.5f),
+                            uncheckedThumbColor = rippleColor.copy(alpha = 0.3f),
+                            uncheckedTrackColor = rippleColor.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
 
             Text(
                 text = "版本更新",

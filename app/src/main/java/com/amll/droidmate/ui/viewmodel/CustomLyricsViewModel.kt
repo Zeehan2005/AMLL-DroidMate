@@ -11,6 +11,7 @@ import com.amll.droidmate.data.repository.LyricsRepository
 import com.amll.droidmate.data.repository.LyricsCacheRepository
 import com.amll.droidmate.di.ServiceLocator
 import com.amll.droidmate.domain.model.LyricsSearchResult
+import com.amll.droidmate.ui.AppSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -464,7 +465,8 @@ class CustomLyricsViewModel @JvmOverloads constructor(
                 val parsed = TTMLConverter.fromLyrics(
                     content = input,
                     title = if (title.isBlank()) "自选歌词" else title,
-                    artist = if (artist.isBlank()) "Unknown" else artist
+                    artist = if (artist.isBlank()) "Unknown" else artist,
+                    processMetadata = AppSettings.isMetadataProcessingEnabled(getApplication())
                 )
                 if (parsed != null) {
                     _appliedLyricsText.value = TTMLConverter.toTTMLString(parsed)

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:android": "vite build && powershell -NoProfile -Command \"Copy-Item -Path ./dist/* -Destination ../app/src/main/assets/amll -Force; Copy-Item -Path ./index.html -Destination ../app/src/main/assets/amll/index.html -Force\""
+    "build:android": "node ./scripts/build-amll.js"
   },
   "keywords": [],
   "author": "",

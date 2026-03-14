@@ -211,6 +211,14 @@ class LyricsRepositoryTest {
     }
 
     @Test
+    fun `compareName treats simplified and traditional Chinese as perfect match`() {
+        val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
+        val n1 = fake.compareName("测试", "測試")
+        assertNotNull(n1)
+        assertEquals("PERFECT", n1!!.name)
+    }
+
+    @Test
     fun `evaluateMatch returns high confidence for similar titles`() {
         val fake = LyricsRepository(HttpClient((MockEngine { respond("", HttpStatusCode.OK) }) as HttpClientEngine))
         val eval = fake.evaluateMatch(

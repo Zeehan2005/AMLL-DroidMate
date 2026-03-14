@@ -6,7 +6,10 @@ import com.amll.droidmate.data.parser.TTMLParser
 import com.amll.droidmate.data.network.NeteaseEapiCrypto
 import com.amll.droidmate.data.network.QqMusicQrcCrypto
 import com.amll.droidmate.data.network.KugouDecrypter
+import android.content.Context
+import com.github.houbb.opencc4j.util.ZhConverterUtil
 import com.amll.droidmate.domain.model.*
+import com.amll.droidmate.ui.AppSettings
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -32,8 +35,12 @@ import timber.log.Timber
 @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
 open class LyricsRepository(
     private val httpClient: HttpClient,
-    private val cacheRepo: LyricsCacheRepository? = null
+    private val cacheRepo: LyricsCacheRepository? = null,
+    private val context: Context? = null
 ) {
+
+    private val processMetadata: Boolean
+        get() = context?.let { AppSettings.isMetadataProcessingEnabled(it) } ?: false
     // scope used for background AMLL probes; keeps them independent of caller
     private val amllProbeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -246,7 +253,8 @@ open class LyricsRepository(
                         val fallbackLyrics = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                             content = fallbackDecoded,
                             title = title ?: "Unknown",
-                            artist = artist ?: "Unknown"
+                            artist = artist ?: "Unknown",
+                            processMetadata = processMetadata
                         )
                         return fallbackLyrics
                     }
@@ -272,7 +280,8 @@ open class LyricsRepository(
             val mainLyrics = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                 content = decodedLyric,
                 title = title ?: "Unknown",
-                artist = artist ?: "Unknown"
+                artist = artist ?: "Unknown",
+                processMetadata = processMetadata
             ) ?: return null
 
             val translationLines = transContent
@@ -297,7 +306,7 @@ open class LyricsRepository(
                         } catch (e: IllegalArgumentException) {
                             it
                         }
-                        com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded)?.lines
+                        com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded, processMetadata = processMetadata)?.lines
                     }.getOrNull()
                 }
 
@@ -361,7 +370,8 @@ open class LyricsRepository(
             val mainLyrics = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                 content = decodeQqLyricPayload(mainEncrypted),
                 title = title ?: "Unknown",
-                artist = artist ?: "Unknown"
+                artist = artist ?: "Unknown",
+                processMetadata = processMetadata
             ) ?: return null
 
             val translationLines = transEncrypted?.let {
@@ -374,7 +384,7 @@ open class LyricsRepository(
             val romanizationLines = romaEncrypted?.let {
                 runCatching {
                     val decoded = decodeQqLyricPayload(it)
-                    com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded)?.lines
+                    com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(decoded, processMetadata = processMetadata)?.lines
                 }.getOrNull()
             }
 
@@ -588,7 +598,8 @@ open class LyricsRepository(
             val mainLyrics = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                 content = mainContent,
                 title = title ?: "Unknown",
-                artist = artist ?: "Unknown"
+                artist = artist ?: "Unknown",
+                processMetadata = processMetadata
             ) ?: return null
 
             val mergedLines = mergeNeteaseAuxiliaryLines(
@@ -606,7 +617,74 @@ open class LyricsRepository(
             null
         }
     }
-    
+
+    /**
+     * 从 AMLL DB 搜索歌词（基于歌名/歌手）
+     */
+    suspend fun searchAmlldb(title: String, artist: String): List<LyricsSearchResult> {
+        return try {
+            val query = listOf(title, artist)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .trim()
+
+            if (query.isEmpty()) return emptyList()
+
+            Timber.i("AMLL DB search starting for query: $query")
+
+            val payload = buildJsonObject {
+                put("query", query)
+                put("type", "all")
+            }
+
+            val response = httpClient.post("https://amildb.bikonoo.com/api/search-lyrics") {
+                contentType(ContentType.Application.Json)
+                setBody(payload.toString())
+            }
+
+            if (!response.status.isSuccess()) {
+                Timber.w("AMLL DB search failed: ${response.status}")
+                return emptyList()
+            }
+
+            val resultArray = Json.parseToJsonElement(response.body<String>()).jsonArray
+            if (resultArray.isEmpty()) return emptyList()
+
+            resultArray.mapNotNull { item ->
+                val itemObj = item.jsonObject
+                val platform = itemObj["platform"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val id = itemObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val titleRes = itemObj["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val artistRes = itemObj["artist"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val albumRes = itemObj["album"]?.jsonPrimitive?.contentOrNull
+                val score = itemObj["score"]?.jsonPrimitive?.intOrNull ?: 0
+                val confidence = (score / 1000f).coerceIn(0f, 1f)
+                val matchType = when {
+                    confidence >= 0.99f -> MatchType.PERFECT.name
+                    confidence >= 0.95f -> MatchType.VERY_HIGH.name
+                    confidence >= 0.9f -> MatchType.HIGH.name
+                    confidence >= 0.7f -> MatchType.PRETTY_HIGH.name
+                    confidence >= 0.5f -> MatchType.MEDIUM.name
+                    confidence >= 0.3f -> MatchType.LOW.name
+                    else -> MatchType.VERY_LOW.name
+                }
+
+                LyricsSearchResult(
+                    provider = "amll",
+                    songId = "$platform:$id",
+                    title = titleRes,
+                    artist = artistRes,
+                    album = albumRes,
+                    confidence = confidence,
+                    matchType = matchType
+                )
+            }.take(20)
+        } catch (e: Exception) {
+            Timber.w(e, "AMLL DB search failed")
+            emptyList()
+        }
+    }
+
     /**
      * 从酷狗音乐搜索歌词
      */
@@ -861,7 +939,8 @@ open class LyricsRepository(
             val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
                 content = decryptedLyrics,
                 title = title ?: "Unknown",
-                artist = artist ?: "Unknown"
+                artist = artist ?: "Unknown",
+                processMetadata = processMetadata
             )
             
             Timber.i("Successfully fetched and decrypted Kugou lyrics for: $idOrHash")
@@ -882,9 +961,19 @@ open class LyricsRepository(
         return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
     }
 
+    private fun convertTraditionalToSimplified(input: String): String {
+        return try {
+            ZhConverterUtil.toSimple(input)
+        } catch (e: Exception) {
+            input
+        }
+    }
+
     internal fun normalizeForComparison(name: String): String {
-        // apply accent stripping first
-        var s = stripAccents(name)
+        // apply Chinese traditional->simplified conversion (align with Unilyric logic)
+        var s = convertTraditionalToSimplified(name)
+        // apply accent stripping next
+        s = stripAccents(s)
         s = s
             .replace('’', '\'')                           // 特殊单引号 -> 普通单引号
             .replace("，", ",")                          // 全角逗号 -> 半角逗号
@@ -900,8 +989,8 @@ open class LyricsRepository(
             .replace(Regex("feat\\.?|ft\\.?|featuring", RegexOption.IGNORE_CASE), "") // strip featured tags
             .replace(Regex("\\b(the|a|an)\\b", RegexOption.IGNORE_CASE), "") // drop leading articles
             // eliminate spaces between Latin and Han to treat "G.E.M. 邓紫棋" same as "G.E.M.邓紫棋"
-            .replace(Regex("(?<=\\p{Latin})\\s+(?=\\p{IsHan})"), "")
-            .replace(Regex("(?<=\\p{IsHan})\\s+(?=\\p{Latin})"), "")
+            .replace(Regex("(?<=\\p{IsLatin})\\s+(?=\\p{IsHan})"), "")
+            .replace(Regex("(?<=\\p{IsHan})\\s+(?=\\p{IsLatin})"), "")
             .replace(Regex("\\s+"), " ")                 // 多个空格 -> 单个空格
             .trim()
         return s
@@ -1290,8 +1379,10 @@ open class LyricsRepository(
     ): TTMLLyrics? {
         return try {
             // 使用新的 UnifiedLyricsParser
-            val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(lrcContent)
-                ?: return null
+            val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
+                lrcContent,
+                processMetadata = processMetadata
+            ) ?: return null
             
             val merged = mergeLyricLines(
                 ttml.lines,
@@ -1317,8 +1408,10 @@ open class LyricsRepository(
     ): TTMLLyrics? {
         return try {
             // 使用新的 UnifiedLyricsParser，它会自动检测YRC格式
-            val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(yrcContent)
-                ?: return null
+            val ttml = com.amll.droidmate.data.parser.UnifiedLyricsParser.parse(
+                yrcContent,
+                processMetadata = processMetadata
+            ) ?: return null
             
             val merged = mergeLyricLines(
                 ttml.lines,
@@ -1659,9 +1752,17 @@ open class LyricsRepository(
             }
         }
 
+        val amllDbJob = launch {
+            Timber.i("AMLL DB search starting...")
+            val list = runCatching { searchAmlldb(title, artist) }.getOrNull() ?: emptyList()
+            Timber.i("AMLL DB search completed: found ${list.size} items")
+            for (r in list) tryPublish(r)
+        }
+
         qqMusicJob.join()
         kugouJob.join()
         neteaseJob.join()
+        amllDbJob.join()
 
         val sortedResults = results.sortedByDescending { it.confidence }
 

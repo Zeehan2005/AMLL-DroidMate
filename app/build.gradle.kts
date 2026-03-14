@@ -77,7 +77,7 @@ dependencies {
 
     // media3 UI gives us DefaultTimeBar and other player controls
     implementation("androidx.media3:media3-ui:1.0.0")
-
+    implementation("androidx.webkit:webkit:1.8.0")
     // Jetpack Compose (Version managed by BOM)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
@@ -97,6 +97,9 @@ dependencies {
 
     // JSON Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+
+    // Chinese simplified/traditional conversion (used for improved track matching)
+    implementation("com.github.houbb:opencc4j:1.6.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

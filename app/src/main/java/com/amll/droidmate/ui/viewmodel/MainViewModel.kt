@@ -273,7 +273,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val ttml = TTMLConverter.fromLyrics(
                     content = lrcContent,
                     title = title,
-                    artist = artist
+                    artist = artist,
+                    processMetadata = AppSettings.isMetadataProcessingEnabled(context)
                 )
                 if (ttml != null) {
                     _lyrics.value = ttml
@@ -303,7 +304,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val parsed: TTMLLyrics? = TTMLConverter.fromLyrics(
                     content = trimmed,
                     title = if (title.isBlank()) "自选歌词" else title,
-                    artist = if (artist.isBlank()) "Unknown" else artist
+                    artist = if (artist.isBlank()) "Unknown" else artist,
+                    processMetadata = AppSettings.isMetadataProcessingEnabled(context)
                 )
 
                 if (parsed != null) {
