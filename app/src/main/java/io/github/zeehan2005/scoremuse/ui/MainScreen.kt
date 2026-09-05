@@ -1029,7 +1029,7 @@ private fun MainMenuDropdownContent(
             },
             colors = MenuDefaults.itemColors(
                 textColor = MaterialTheme.colorScheme.onSurface,
-                trailingContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                trailingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
         )
         DropdownMenuItem(
@@ -1060,7 +1060,7 @@ private fun MainMenuDropdownContent(
             },
             colors = MenuDefaults.itemColors(
                 textColor = MaterialTheme.colorScheme.onSurface,
-                trailingContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                trailingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
         )
         DropdownMenuItem(
@@ -1074,7 +1074,7 @@ private fun MainMenuDropdownContent(
             },
             colors = MenuDefaults.itemColors(
                 textColor = MaterialTheme.colorScheme.onSurface,
-                trailingContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                trailingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
         )
     }

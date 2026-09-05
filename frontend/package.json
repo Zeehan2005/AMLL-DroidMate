@@ -23,14 +23,15 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "esbuild": "^0.28.2",
     "rollup": "latest",
     "terser": "latest",
     "typescript": "latest",
-    "vite-plugin-top-level-await": "latest",
+    "vite-plugin-top-level-await": "^1.2.2",
     "vite-plugin-wasm": "latest"
   },
   "allowScripts": {
     "@swc/core@1.15.40": true,
-    "esbuild@0.25.12": true
+    "esbuild@0.28.2": true
   }
 }

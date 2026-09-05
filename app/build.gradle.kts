@@ -295,21 +295,18 @@ dependencies {
     // Jetpack WindowManager：Activity Embedding / 大屏分屏支持
     implementation("androidx.window:window:latest.release")
     // ==================== Jetpack Compose UI ====================
-    // 版本号由 BOM 统一管理，不需要单独指定
     // Compose UI 核心功能
-    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui:latest.release")
     // UI 图形绘制（Canvas、路径等）
-    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-graphics:latest.release")
     // UI 工具预览（@Preview 注解支持）
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    // Material Design 3 组件库
-    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview:latest.release")
     // Material3 自适应布局（WindowSizeClass 等自适应基元）
-    implementation("androidx.compose.material3.adaptive:adaptive")
+    implementation("androidx.compose.material3.adaptive:adaptive:latest.release")
     // Google Material 设计组件（非 Compose 版本）
     implementation("com.google.android.material:material:latest.release")
     // Material 图标扩展库（更多图标选择）
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.material:material-icons-extended:latest.release")
     implementation("androidx.palette:palette:latest.release")
     
     // ==================== 图片加载 ====================
@@ -372,11 +369,11 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:latest.release")
     
     // Compose UI 测试框架
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:latest.release")
     
     // 调试工具（Compose 预览和测试辅助）
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    debugImplementation("androidx.compose.ui:ui-tooling:latest.release")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:latest.release")
 }
 repositories {
     google()

@@ -75,7 +75,7 @@ export default defineConfig({
     
     // 库模式配置：打包为独立的库文件
     lib: {
-      entry: resolve(__dirname, 'src/main.tsx'),  // 入口文件
+      entry: resolve(import.meta.dirname, 'src/main.tsx'),  // 入口文件
       name: 'AMLL',
       formats: ['es'],  // 改用 ES 模块格式以支持 Wasm 和 Top-level await
       fileName: () => 'amll.bundle.js',  // 输出文件名（固定为 amll.bundle.js）
@@ -85,7 +85,7 @@ export default defineConfig({
     // But first, let's ensure the rollup options don't exclude it.
     rollupOptions: {
       output: {
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
       // no externalization for AMLL core
       external: []

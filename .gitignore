@@ -1,13 +1,9 @@
-.idea/
-.gradle/
 build/
 app/build/
-.lingma/
-.project/
 node_modules/
 frontend/dist/
 local.properties
-/.claude/
 /app/src/main/assets/amll/
-/.kotlin/
 frontend/package-lock.json
+.*/
+!.github/

@@ -21,7 +21,7 @@ plugins {
     // Android Application 插件：用于编译 Android 应用
     // version: Android Gradle Plugin 版本，需与 Android Studio 版本匹配
     // apply false: 仅声明版本，不立即应用（在子模块中按需应用）
-    id("com.android.application") version "9.2.1" apply false
+    id("com.android.application") version "9.4.0" apply false
     
     // Kotlin 序列化插件：支持 Kotlin 数据类的 JSON/XML 序列化
     // version: Kotlin 编译器版本
