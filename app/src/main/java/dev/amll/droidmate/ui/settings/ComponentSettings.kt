@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -92,6 +93,10 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
 
     // 字体设置状态
     var amllFontFamily by remember { mutableStateOf(AMLLSettings.getAmllFontFamily(context)) }
+    // 字重与字号状态
+    var fontWeight by remember { mutableStateOf(AMLLSettings.getAmllFontWeight(context) ?: AMLLSettings.DEFAULT_AMLL_FONT_WEIGHT) }
+    var useDefaultFontSize by remember { mutableStateOf(AMLLSettings.getAmllLyricFontSize(context) == null) }
+    var lyricFontSize by remember { mutableStateOf(AMLLSettings.getAmllLyricFontSize(context) ?: AMLLSettings.DEFAULT_AMLL_LYRIC_FONT_SIZE) }
     var importedFonts by remember {
         mutableStateOf(
             AMLLSettings.getAmllFontFiles(context).filter { File(it.absolutePath).exists() }
@@ -397,6 +402,11 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
                         amllFontFamily = AMLLSettings.getDefaultAmllFontFamily()
                         enabledFontIds = emptySet()
                         importedFonts = emptyList()
+                        fontWeight = AMLLSettings.DEFAULT_AMLL_FONT_WEIGHT
+                        AMLLSettings.setAmllFontWeight(context, fontWeight)
+                        useDefaultFontSize = true
+                        lyricFontSize = AMLLSettings.DEFAULT_AMLL_LYRIC_FONT_SIZE
+                        AMLLSettings.setAmllLyricFontSize(context, 0)
                         fontStatusMessage = "已还原为默认 font-family 设置"
                     },
                     modifier = Modifier.weight(1f)
@@ -404,6 +414,92 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
                     Text("还原")
                 }
             }
+
+            // ==================== 字重与字号调节 ====================
+            Text(
+                text = "字重与字号",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // 字重滑块
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "字重：$fontWeight",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = when (fontWeight) {
+                        in 100..199 -> "细体"
+                        in 200..299 -> "特轻"
+                        in 300..399 -> "轻体"
+                        400 -> "常规"
+                        in 401..499 -> "中粗"
+                        500 -> "中等"
+                        in 501..599 -> "中粗+"
+                        600 -> "半粗"
+                        in 601..699 -> "加粗-"
+                        700 -> "加粗"
+                        in 701..799 -> "特粗-"
+                        800 -> "特粗"
+                        in 801..900 -> "黑体"
+                        else -> ""
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+            Slider(
+                value = fontWeight.toFloat(),
+                onValueChange = {
+                    fontWeight = it.toInt()
+                    AMLLSettings.setAmllFontWeight(context, fontWeight)
+                },
+                valueRange = 100f..900f,
+                steps = 7,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // 字号：自适应默认 / 手动指定
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (useDefaultFontSize) "字体大小：自适应默认" else "字体大小：$lyricFontSize px",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                SwitchWithIcon(
+                    checked = useDefaultFontSize,
+                    onCheckedChange = { enabled ->
+                        useDefaultFontSize = enabled
+                        if (enabled) {
+                            AMLLSettings.setAmllLyricFontSize(context, 0)
+                        } else {
+                            AMLLSettings.setAmllLyricFontSize(context, lyricFontSize)
+                        }
+                    },
+                    colors = switchColors
+                )
+            }
+            Slider(
+                value = lyricFontSize.toFloat(),
+                onValueChange = {
+                    lyricFontSize = it.toInt()
+                    if (!useDefaultFontSize) AMLLSettings.setAmllLyricFontSize(context, lyricFontSize)
+                },
+                valueRange = 12f..48f,
+                steps = 0,
+                enabled = !useDefaultFontSize,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             // 已导入字体列表
             val sortedFonts = importedFonts.sortedBy { it.fontFamilyName.lowercase() }

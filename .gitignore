@@ -7,3 +7,4 @@ local.properties
 frontend/package-lock.json
 .*/
 !.github/
+!.workbuddy/

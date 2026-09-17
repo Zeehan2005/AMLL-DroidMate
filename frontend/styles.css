@@ -37,8 +37,10 @@ html, body {
 .amll-lyric-player {
   pointer-events: auto;
   font-family: var(--amll-lp-font-family);
-  /* 限制最大字号，避免平板竖屏时因 5vh 公式导致超大文字 */
-  --amll-lp-font-size: max(12px, min(8vw, 32px));
+  /* 默认自适应字号；当用户在设置中指定字体大小后，--amll-user-font-size 会覆盖它 */
+  --amll-lp-font-size: var(--amll-user-font-size, max(12px, min(8vw, 32px)));
+  /* 字重：默认正常字重，可被 --amll-lp-font-weight 覆盖 */
+  font-weight: var(--amll-lp-font-weight, 400);
 }
 
 /* ==================== 滚动条隐藏 ==================== */

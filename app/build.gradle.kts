@@ -192,7 +192,10 @@ android {
     // ==================== 基本配置 ====================
     // 包名：应用的唯一标识符（用于 Google Play、安装等）
     namespace = "dev.amll.droidmate"
-    // 编译 SDK 版本：使用最新 SDK 以获得新特性支持
+    // 编译 SDK 版本：使用稳定版 SDK（android-37.0 / API 37）。
+    // 注意：项目曾因 androidx.compose.ui:ui:latest.release 被解析到 1.13.0-alpha03（预览版，
+    // 要求 compileSdk ≥ 37.1）而触发 AAR 元数据告警。现已改为由 Compose BOM 统一接管 Compose
+    // 版本（见 dependencies 块），使用稳定版（ui 1.12.1 等），无需升级到 preview SDK。
     compileSdk = 37
 
     defaultConfig {
@@ -261,53 +264,56 @@ androidComponents {
 // ============================================================================
 dependencies {
     // ==================== Compose BOM (Bill of Materials) ====================
-    // 使用 BOM 统一管理所有 Compose 相关库的版本，避免版本冲突
-    implementation(platform("androidx.compose:compose-bom:latest.release"))
-    implementation("androidx.compose.material3:material3:latest.release")
-    androidTestImplementation(platform("androidx.compose:compose-bom:latest.release"))
+    // 使用 BOM 统一管理所有 Compose 相关库的版本，避免版本冲突。
+    // 注意：所有 androidx.compose.* 依赖都不要写显式版本号，统一由 BOM 决定，
+    // 否则 latest.release 可能解析到预览/alpha（如 ui 1.13.0-alpha03 要求 compileSdk 37.1）。
+    // 这里把 BOM 固定到当前最新稳定版，保证可复现构建。
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.compose.material3:material3:1.5.0-alpha28")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
 
     // ==================== AndroidX 核心库 ====================
     // Kotlin 扩展函数，提供更简洁的 API
-    implementation("androidx.core:core-ktx:latest.release")
+    implementation("androidx.core:core-ktx:1.19.0")
     
     // 启动屏支持（Android 12+ 原生启动屏 API）
     // 1.2.0 是最新稳定版（1.1.0 从未发布正式版）
-    implementation("androidx.core:core-splashscreen:latest.release")
+    implementation("androidx.core:core-splashscreen:1.2.0")
     
     // Lifecycle 运行时和 ViewModel（支持 Compose）
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:latest.release")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:latest.release")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.12.0-alpha03")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.12.0-alpha03")
     
     // Activity Compose 集成（使 Activity 支持 Compose）
-    implementation("androidx.activity:activity-compose:latest.release")
+    implementation("androidx.activity:activity-compose:1.14.0-alpha02")
     
     // 媒体播放支持（用于获取音乐播放信息）
-    implementation("androidx.media:media:latest.release")
+    implementation("androidx.media:media:1.8.0")
     
     // 调色板提取（从专辑封面提取颜色）
 
     // ==================== Media3 UI 组件 ====================
     // 提供 DefaultTimeBar 和其他播放器控制组件
-    implementation("androidx.media3:media3-ui:latest.release")
+    implementation("androidx.media3:media3-ui:1.11.1")
     
     // WebView 支持（用于 AMLL 歌词渲染）
-    implementation("androidx.webkit:webkit:latest.release")
+    implementation("androidx.webkit:webkit:1.18.0-alpha01")
     // Jetpack WindowManager：Activity Embedding / 大屏分屏支持
-    implementation("androidx.window:window:latest.release")
+    implementation("androidx.window:window:1.6.0-alpha05")
     // ==================== Jetpack Compose UI ====================
-    // Compose UI 核心功能
-    implementation("androidx.compose.ui:ui:latest.release")
+    // Compose UI 核心功能（版本由上方 Compose BOM 统一管理，勿写 :latest.release）
+    implementation("androidx.compose.ui:ui:1.12.1")
     // UI 图形绘制（Canvas、路径等）
-    implementation("androidx.compose.ui:ui-graphics:latest.release")
+    implementation("androidx.compose.ui:ui-graphics:1.12.1")
     // UI 工具预览（@Preview 注解支持）
-    implementation("androidx.compose.ui:ui-tooling-preview:latest.release")
+    implementation("androidx.compose.ui:ui-tooling-preview:1.12.1")
     // Material3 自适应布局（WindowSizeClass 等自适应基元）
-    implementation("androidx.compose.material3.adaptive:adaptive:latest.release")
+    implementation("androidx.compose.material3.adaptive:adaptive:1.4.0-alpha02")
     // Google Material 设计组件（非 Compose 版本）
-    implementation("com.google.android.material:material:latest.release")
+    implementation("com.google.android.material:material:1.14.0")
     // Material 图标扩展库（更多图标选择）
-    implementation("androidx.compose.material:material-icons-extended:latest.release")
-    implementation("androidx.palette:palette:latest.release")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation("androidx.palette:palette:1.1.0-alpha01")
     
     // ==================== 图片加载 ====================
     // Coil: Kotlin 编写的图片加载库，支持 Compose
@@ -349,9 +355,9 @@ dependencies {
 
     // ==================== 数据库（Room ORM） ====================
     // Room 运行时库（SQLite 对象映射）
-    implementation("androidx.room:room-runtime:latest.release")
+    implementation("androidx.room:room-runtime:2.8.5")
     // Room Kotlin 扩展（Flow、协程支持）
-    implementation("androidx.room:room-ktx:latest.release")
+    implementation("androidx.room:room-ktx:2.8.5")
 
     // ==================== 测试库 ====================
     // JUnit4: Java/Kotlin 单元测试框架
@@ -365,15 +371,15 @@ dependencies {
     testImplementation("io.ktor:ktor-client-mock-jvm:latest.release")
     
     // Android 仪器化测试（在模拟器/真机上运行）
-    androidTestImplementation("androidx.test.ext:junit:latest.release")
-    androidTestImplementation("androidx.test.espresso:espresso-core:latest.release")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     
     // Compose UI 测试框架
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4:latest.release")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.12.1")
     
     // 调试工具（Compose 预览和测试辅助）
-    debugImplementation("androidx.compose.ui:ui-tooling:latest.release")
-    debugImplementation("androidx.compose.ui:ui-test-manifest:latest.release")
+    debugImplementation("androidx.compose.ui:ui-tooling:1.12.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.12.1")
 }
 repositories {
     google()

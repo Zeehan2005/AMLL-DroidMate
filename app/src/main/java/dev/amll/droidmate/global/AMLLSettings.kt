@@ -21,7 +21,7 @@ object AMLLSettings {
     private const val KEY_AMLL_ANIMATION_ENABLE_BLUR = "amll_animation_enable_blur"  // 启用模糊效果
 
     // 歌词样式相关设置
-    private const val KEY_AMLL_LYRIC_SIZE_PRESET = "amll_lyric_size_preset"  // 歌词字体大小预设
+    private const val KEY_AMLL_LYRIC_FONT_SIZE = "amll_lyric_font_size"  // 歌词字体大小（像素）
     private const val KEY_AMLL_ENABLE_TRANSLATION_LINE = "amll_enable_translation_line"  // 显示翻译歌词
     private const val KEY_AMLL_ENABLE_ROMAN_LINE = "amll_enable_roman_line"  // 显示音译歌词
     private const val KEY_AMLL_ADVANCE_DYNAMIC_LYRIC_TIME = "amll_advance_dynamic_lyric_time"  // 提前歌词行时序
@@ -39,6 +39,12 @@ object AMLLSettings {
 
     /** 默认 AMLL 歌词字体族（Apple Music 风格） */
     const val DEFAULT_AMLL_FONT_FAMILY = "\"SF Pro Display\", \"PingFang SC\", system-ui, -apple-system, \"Segoe UI\", sans-serif"
+
+    /** 默认歌词字重（正常） */
+    const val DEFAULT_AMLL_FONT_WEIGHT = 400
+
+    /** 默认歌词字体大小（像素），仅在用户未显式设置时作为回退值使用 */
+    const val DEFAULT_AMLL_LYRIC_FONT_SIZE = 28
 
     /**
      * AMLL 自定义字体文件
@@ -208,6 +214,48 @@ object AMLLSettings {
         prefs(context).remove(KEY_AMLL_ACTIVE_FONT_ID)
         prefs(context).remove(KEY_AMLL_ENABLED_FONT_IDS)
         prefs(context).remove(KEY_AMLL_FONT_FILES)
+        prefs(context).remove(KEY_AMLL_FONT_WEIGHT)
+        prefs(context).remove(KEY_AMLL_LYRIC_FONT_SIZE)
+    }
+
+    // === 歌词字重与字号设置 ===
+
+    /**
+     * 获取歌词字重。
+     * @return 字重数值（通常 100-900），未设置时返回 null（前端使用 CSS 默认 400）
+     */
+    fun getAmllFontWeight(context: Context): Int? {
+        val p = prefs(context)
+        return if (p.contains(KEY_AMLL_FONT_WEIGHT)) p.getInt(KEY_AMLL_FONT_WEIGHT) else null
+    }
+
+    /**
+     * 设置歌词字重。
+     * @param weight 字重数值（建议 100-900 之间，如 400=常规、700=加粗）
+     */
+    fun setAmllFontWeight(context: Context, weight: Int) {
+        prefs(context).putIntAsync(KEY_AMLL_FONT_WEIGHT, weight)
+    }
+
+    /**
+     * 获取歌词字体大小（像素）。
+     * @return 字号（px），未设置时返回 null（前端使用自适应默认大小）
+     */
+    fun getAmllLyricFontSize(context: Context): Int? {
+        val p = prefs(context)
+        return if (p.contains(KEY_AMLL_LYRIC_FONT_SIZE)) p.getInt(KEY_AMLL_LYRIC_FONT_SIZE) else null
+    }
+
+    /**
+     * 设置歌词字体大小（像素）。
+     * @param sizePx 字号（px），传入 <= 0 会清除该设置并恢复自适应默认大小
+     */
+    fun setAmllLyricFontSize(context: Context, sizePx: Int) {
+        if (sizePx <= 0) {
+            prefs(context).remove(KEY_AMLL_LYRIC_FONT_SIZE)
+        } else {
+            prefs(context).putIntAsync(KEY_AMLL_LYRIC_FONT_SIZE, sizePx)
+        }
     }
 
     private fun stableFontId(absolutePath: String): String {

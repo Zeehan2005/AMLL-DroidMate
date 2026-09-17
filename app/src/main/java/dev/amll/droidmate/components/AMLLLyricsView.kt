@@ -122,6 +122,10 @@ fun AMLLLyricsView(
     var lastFontConfigSignature by remember { mutableStateOf<String?>(null) }
     var lastBackgroundConfigValue by remember { mutableStateOf<String?>(null) }
 
+    // 字重与字号配置去重状态
+    var lastFontWeightValue by remember { mutableStateOf<Int?>(null) }
+    var lastFontSizeValue by remember { mutableStateOf<Int?>(null) }
+
     // ==================== 时间���新节流 ====================
     /**
      * 记录上一次更新时间的时间戳（用于节流，避免每帧都更新）
@@ -225,6 +229,9 @@ fun AMLLLyricsView(
                         if (lastLyrics != null) {
                             lastLyrics = null
                         }
+                        // 页面重载会清空 JS 注入的 CSS 变量，重置去重标记以便重新应用字重/字号
+                        lastFontWeightValue = null
+                        lastFontSizeValue = null
                         Timber.d("[AMLLLyrics] [$debugSource#$instanceId] WebView page started: $url")
                     }
 
@@ -415,6 +422,34 @@ fun AMLLLyricsView(
                 Timber.d("[AMLLLyrics] [$debugSource#$instanceId] Bridge call: configureLyricMotion(config=$pendingMotionConfig)")
                 view.evaluateJavascript("window.configureLyricMotion && window.configureLyricMotion($pendingMotionConfig);", null)
                 lastMotionConfigValue = pendingMotionConfig
+            }
+
+            // ==================== 歌词字重配置 ====================
+            /** 字重同时写入 CSS 变量与 .amll-lyric-player 的 inline style，双保险确保生效 */
+            val fontWeight = AMLLSettings.getAmllFontWeight(view.context)
+            if (lastFontWeightValue != fontWeight) {
+                lastFontWeightValue = fontWeight
+                val js = if (fontWeight != null && fontWeight > 0) {
+                    Timber.d("[AMLLLyrics] [$debugSource#$instanceId] Bridge call: set font-weight=$fontWeight")
+                    "(function(){var p=document.querySelector('.amll-lyric-player');document.documentElement.style.setProperty('--amll-lp-font-weight','$fontWeight');if(p)p.style.fontWeight='$fontWeight';})();"
+                } else {
+                    "(function(){var p=document.querySelector('.amll-lyric-player');document.documentElement.style.removeProperty('--amll-lp-font-weight');if(p)p.style.fontWeight='';})();"
+                }
+                view.evaluateJavascript(js, null)
+            }
+
+            // ==================== 歌词字号配置 ====================
+            /** 字号同时写入 CSS 变量与 .amll-lyric-player 的 inline style，双保险确保生效 */
+            val lyricFontSize = AMLLSettings.getAmllLyricFontSize(view.context)
+            if (lastFontSizeValue != lyricFontSize) {
+                lastFontSizeValue = lyricFontSize
+                val js = if (lyricFontSize != null && lyricFontSize > 0) {
+                    Timber.d("[AMLLLyrics] [$debugSource#$instanceId] Bridge call: set font-size=${lyricFontSize}px")
+                    "(function(){var p=document.querySelector('.amll-lyric-player');document.documentElement.style.setProperty('--amll-user-font-size','${lyricFontSize}px');if(p)p.style.fontSize='${lyricFontSize}px';})();"
+                } else {
+                    "(function(){var p=document.querySelector('.amll-lyric-player');document.documentElement.style.removeProperty('--amll-user-font-size');if(p)p.style.fontSize='';})();"
+                }
+                view.evaluateJavascript(js, null)
             }
 
             // ==================== 歌词样式配置 ====================
