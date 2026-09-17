@@ -175,7 +175,8 @@ fun getBuildTimestamp(): String {
     return SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())
 }
 /** 正式版版本号 */
-val customVersion = ""
+val customVersion = "v4.3.0"
+//val customVersion = "Alpha ${getBuildTimestamp()}" // 开发版
 
 // ============================================================================
 // Android 应用配置
@@ -212,8 +213,7 @@ android {
         versionCode = 1
         
         // 版本名称：显示给用户的版本信息（使用时间戳格式）
-        versionName = "Alpha ${getBuildTimestamp()}" // 开发版
-//        versionName = customVersion // 正式版
+        versionName = customVersion
 
     }
 
@@ -252,8 +252,7 @@ androidComponents {
             // 重命名 APK 文件（仅适用于 VariantOutputImpl 类型）
             (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set(
                 // 版本号
-                "AMLL-DroidMate-Alpha-${getBuildTimestamp()}.apk" // 开发版
-//                "AMLL-DroidMate-$customVersion.apk" // 正式版
+                "AMLL-DroidMate-$customVersion.apk" // 正式版
             )
         }
     }
