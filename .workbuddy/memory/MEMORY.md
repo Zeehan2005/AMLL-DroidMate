@@ -9,3 +9,7 @@
 ## 歌词组件特性
 - 字重/字号调节：设置存于 `AMLLSettings`（`getAmllFontWeight`/`getAmllLyricFontSize` 等），由 `AMLLLyricsView` 在 `update` 中注入到 WebView（CSS 变量 `--amll-lp-font-weight` / `--amll-user-font-size`，并直接对 `.amll-lyric-player` 设 inline style 兜底），UI 在 `ComponentSettings.kt`。
 - 核心（`@applemusic-like-lyrics`）通过 `--amll-lp-font-size` 消费字号；`--amll-lp-font-size-preset` 在该版本核心中未被消费，旧 `setLyricSizePreset` 实际无效。
+
+## 字体导入 Picker 兼容性（重要）
+- `ComponentSettings.kt` 导入字体的 `OpenMultipleDocuments` launcher 启动时传 `*/*` 而非 `font/*`：部分系统文件 Picker 仅识别其[官方文档](https://open.oppomobile.com/documentation/page/info?id=13711)列出的标准 MIME（image/*、audio/*、video/*、text/*、application/pdf 等），**不支持 `font/*`**，传入会导致 Picker 过滤后无文件可选 / 无法打开。
+- 因放开为 `*/*`，在 `importFontToInternalStorage` 落盘前按扩展名（ttf/otf/woff/woff2/ttc）严格校验，非字体文件抛 IOException 提示，由外层 try/catch 显示"导入失败"。

@@ -389,7 +389,11 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
 
                 Button(
                     onClick = {
-                        importFontLauncher.launch(arrayOf("font/*"))
+                        // 部分系统文件 Picker 仅识别其官方文档列出的标准 MIME
+                        // 类型（image/*、audio/*、video/*、text/*、application/pdf 等），
+                        // 不支持 font/*，传入会导致 Picker 过滤后无文件可选 / 无法打开。
+                        // 因此放开为 */*，并在 importFontToInternalStorage 中按扩展名校验。
+                        importFontLauncher.launch(arrayOf("*/*"))
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -597,7 +601,17 @@ private data class ImportedFontResult(
 @Throws(IOException::class)
 private fun importFontToInternalStorage(context: android.content.Context, sourceUri: Uri): ImportedFontResult {
     val resolver = context.contentResolver
+
+    // Picker 已放开为 */*（兼容 OPPO/ColorOS 等不支持 font/* 的设备），
+    // 因此这里在落盘前按扩展名 / MIME 校验，避免把非字体文件导入为字体。
+    val detectedType = resolver.getType(sourceUri)
     val rawName = queryDisplayName(context, sourceUri) ?: "custom_font_${System.currentTimeMillis()}.ttf"
+    val ext = rawName.substringAfterLast('.', "").lowercase()
+    val allowedExt = setOf("ttf", "otf", "woff", "woff2", "ttc")
+    if (ext.isNotEmpty() && ext !in allowedExt && detectedType?.startsWith("font/") != true) {
+        throw IOException("不支持的字体文件类型（.${ext}），仅支持 ttf / otf / woff / woff2 / ttc 字体文件")
+    }
+
     val safeName = rawName.replace(Regex("[^A-Za-z0-9._-]"), "_")
 
     val fontDir = File(context.filesDir, "amll_fonts")
