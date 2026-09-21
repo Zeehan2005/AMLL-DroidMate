@@ -175,7 +175,7 @@ fun getBuildTimestamp(): String {
     return SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())
 }
 /** 正式版版本号 */
-val customVersion = "v4.3.0"
+val customVersion = ""
 //val customVersion = "Alpha ${getBuildTimestamp()}" // 开发版
 
 // ============================================================================
