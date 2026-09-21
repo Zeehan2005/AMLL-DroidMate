@@ -9,9 +9,6 @@ import io.ktor.http.HttpHeaders
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 private const val REPO_OWNER = "Zeehan2005"
 private const val REPO_NAME = "ScoreMuse"
@@ -19,8 +16,12 @@ private const val RELEASES_API = "https://api.github.com/repos/$REPO_OWNER/$REPO
 private const val ALPHA_STABLE_OVERRIDE_MINUTES = 15L
 
 private val stableRegex = Regex("^v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:[-.].*)?$")
-private val alphaRegex = Regex("(?i).*alpha[\\s-]+(\\d{14})(?:[-.].*)?$")
-private val alphaFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+// Alpha: vX.X.X-alpha<suffix>，suffix 可选，可为任意内容或空
+private val alphaRegex = Regex("(?i)^v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?[-_.]?alpha(.*)$")
+// Beta: vX.X.X-beta<suffix>，suffix 可选，可为任意内容或空
+private val betaRegex = Regex("(?i)^v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?[-_.]?beta(.*)$")
+
+private enum class VersionChannel { STABLE, ALPHA, BETA }
 
 data class UpdateCheckResult(
     val hasUpdate: Boolean,
@@ -36,8 +37,8 @@ data class UpdateCheckResult(
 private data class InstalledVersion(
     val raw: String,
     val normalized: String,
-    val stable: SemVer? = null,
-    val alphaInstant: Instant? = null
+    val channel: VersionChannel,
+    val stable: SemVer? = null
 )
 
 private data class ReleaseCandidate(
@@ -46,8 +47,8 @@ private data class ReleaseCandidate(
     val htmlUrl: String,
     val notes: String,
     val publishedAt: Instant,
-    val stable: SemVer? = null,
-    val alphaInstant: Instant? = null
+    val channel: VersionChannel,
+    val stable: SemVer? = null
 )
 
 private data class SemVer(val major: Int, val minor: Int, val patch: Int) : Comparable<SemVer> {
@@ -74,9 +75,10 @@ private data class GitHubReleaseDto(
  * GitHub 版本更新检查器
  *
  * 这个对象负责从 GitHub Releases API 检查应用是否有新版本可用。
- * 支持两种更新渠道：
+ * 支持三种更新渠道：
  * - Stable（稳定版）：正式发布版本，格式如 "v1.2.3"
- * - Alpha（开放版）：Alpha 测试版本，格式如 "Alpha-20240101120000"
+ * - Alpha（开放版）：Alpha 测试版本，格式如 "v1.2.3-alpha"（后缀任意或为空）
+ * - Beta（测试版）：Beta 测试版本，格式如 "v1.2.3-beta"（后缀任意或为空）
  *
  * 更新检查逻辑：
  * 1. 解析当前安装版本的版本号
@@ -146,16 +148,16 @@ object GitHubUpdateChecker {
         channel: UpdateChannel
     ): ReleaseCandidate? {
         val latestStable = candidates
-            .filter { !it.isPrerelease && it.stable != null }
-            .maxWithOrNull(compareBy<ReleaseCandidate> { it.stable!! }.thenBy { it.publishedAt })
+            .filter { it.channel == VersionChannel.STABLE }
+            .maxWithOrNull(compareBy<ReleaseCandidate> { it.stable ?: SemVer(0, 0, 0) }.thenBy { it.publishedAt })
 
         val latestBeta = candidates
-            .filter { it.isPrerelease && it.stable != null }
-            .maxWithOrNull(compareBy<ReleaseCandidate> { it.stable!! }.thenBy { it.publishedAt })
+            .filter { it.channel == VersionChannel.BETA }
+            .maxWithOrNull(compareBy<ReleaseCandidate> { it.stable ?: SemVer(0, 0, 0) }.thenBy { it.publishedAt })
 
         val latestAlpha = candidates
-            .filter { it.isPrerelease && it.alphaInstant != null }
-            .maxWithOrNull(compareBy<ReleaseCandidate> { it.alphaInstant!! }.thenBy { it.publishedAt })
+            .filter { it.channel == VersionChannel.ALPHA }
+            .maxWithOrNull(compareBy<ReleaseCandidate> { it.stable ?: SemVer(0, 0, 0) }.thenBy { it.publishedAt })
 
         return when (channel) {
             UpdateChannel.STABLE -> latestStable
@@ -175,31 +177,15 @@ object GitHubUpdateChecker {
     }
 
     private fun isRemoteNewer(installed: InstalledVersion, remote: ReleaseCandidate): Boolean {
-        remote.stable?.let { remoteStable ->
-            installed.stable?.let { return remoteStable > it }
-            installed.alphaInstant?.let { return remote.publishedAt.isAfter(it) }
-            return true
-        }
-
-        remote.alphaInstant?.let { remoteAlpha ->
-            installed.alphaInstant?.let { return remoteAlpha.isAfter(it) }
-            installed.stable?.let { return remote.publishedAt.isAfter(parseStableAsApproxInstant(it)) }
-            return true
-        }
-
-        return false
+        val remoteStable = remote.stable ?: return false
+        val installedStable = installed.stable ?: return true
+        return remoteStable > installedStable
     }
 
     private fun isSameVersion(installed: InstalledVersion, remote: ReleaseCandidate): Boolean {
-        remote.stable?.let { remoteStable ->
-            return installed.stable == remoteStable
-        }
-
-        remote.alphaInstant?.let { remoteAlpha ->
-            return installed.alphaInstant == remoteAlpha
-        }
-
-        return false
+        val remoteStable = remote.stable ?: return false
+        val installedStable = installed.stable ?: return false
+        return remoteStable == installedStable
     }
 
     private fun toCandidate(dto: GitHubReleaseDto): ReleaseCandidate? {
@@ -208,9 +194,8 @@ object GitHubUpdateChecker {
         } ?: return null
 
         val tag = dto.tagName.trim()
-        val stable = parseStable(tag)
-        val alpha = parseAlpha(tag)
-        if (stable == null && alpha == null) return null
+        val stable = parseStable(tag) ?: return null
+        val channel = detectChannel(tag, dto.prerelease)
 
         return ReleaseCandidate(
             tagName = normalizeVersionName(tag),
@@ -218,8 +203,8 @@ object GitHubUpdateChecker {
             htmlUrl = dto.htmlUrl,
             notes = dto.body.orEmpty().trim(),
             publishedAt = published,
-            stable = stable,
-            alphaInstant = alpha
+            channel = channel,
+            stable = stable
         )
     }
 
@@ -233,8 +218,8 @@ object GitHubUpdateChecker {
         return InstalledVersion(
             raw = trimmed,
             normalized = normalizeVersionName(trimmed),
-            stable = parseStable(trimmed),
-            alphaInstant = parseAlpha(trimmed)
+            channel = detectChannel(trimmed),
+            stable = parseStable(trimmed)
         )
     }
 
@@ -246,43 +231,32 @@ object GitHubUpdateChecker {
         return SemVer(major, minor, patch)
     }
 
-    private fun parseAlpha(input: String): Instant? {
-        val raw = extractAlphaDigits(input) ?: return null
-        val localDateTime = runCatching {
-            LocalDateTime.parse(raw, alphaFormatter)
-        }.getOrNull() ?: return null
-
-        // Alpha version timestamp is defined as UTC+8 by project convention.
-        return localDateTime.atOffset(ZoneOffset.ofHours(8)).toInstant()
+    private fun detectChannel(tag: String): VersionChannel {
+        val trimmed = tag.trim()
+        if (alphaRegex.matches(trimmed)) return VersionChannel.ALPHA
+        if (betaRegex.matches(trimmed)) return VersionChannel.BETA
+        return VersionChannel.STABLE
     }
 
-    private fun parseStableAsApproxInstant(stable: SemVer): Instant {
-        /** Fallback ordering when installed version is stable but remote is Alpha. */
-        val syntheticYear = 2000 + stable.major.coerceIn(0, 99)
-        val syntheticMonth = (stable.minor.coerceIn(0, 11) + 1)
-        val syntheticDay = (stable.patch.coerceIn(0, 27) + 1)
-        return LocalDateTime.of(syntheticYear, syntheticMonth, syntheticDay, 0, 0)
-            .toInstant(ZoneOffset.UTC)
+    private fun detectChannel(tag: String, isPrerelease: Boolean): VersionChannel {
+        val byTag = detectChannel(tag)
+        if (byTag != VersionChannel.STABLE) return byTag
+        // 标签无 alpha/beta 后缀时，按 GitHub 的 prerelease 标记回退：
+        // 旧的纯 vX.X.X 预览版被视为 BETA（保留历史行为）。
+        return if (isPrerelease) VersionChannel.BETA else VersionChannel.STABLE
     }
 
     private fun normalizeVersionName(input: String): String {
         val trimmed = input.trim()
-        parseStable(trimmed)?.let {
-            val betaMatch = Regex("Beta\\s*(\\d+)?").find(trimmed)
-            return if (betaMatch != null) {
-                val betaVersion = betaMatch.groupValues[1]
-                if (betaVersion.isNotEmpty()) "v${it.major}.${it.minor}.${it.patch} Beta $betaVersion"
-                else "v${it.major}.${it.minor}.${it.patch} Beta"
-            } else {
-                it.toString()
-            }
+        val semver = parseStable(trimmed) ?: return trimmed
+        alphaRegex.find(trimmed)?.let { m ->
+            val suffix = m.groupValues[4]
+            return "v${semver.major}.${semver.minor}.${semver.patch}-alpha$suffix"
         }
-        extractAlphaDigits(trimmed)?.let { return "Alpha $it" }
-        return trimmed
-    }
-
-    private fun extractAlphaDigits(input: String): String? {
-        val match = alphaRegex.matchEntire(input.trim()) ?: return null
-        return match.groupValues[1]
+        betaRegex.find(trimmed)?.let { m ->
+            val suffix = m.groupValues[4]
+            return "v${semver.major}.${semver.minor}.${semver.patch}-beta$suffix"
+        }
+        return semver.toString()
     }
 }
