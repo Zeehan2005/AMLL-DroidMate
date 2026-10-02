@@ -53,7 +53,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TextSnippet
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -71,7 +70,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -79,8 +77,6 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -262,7 +258,7 @@ fun MainScreen() {
             rippleColor.value = initialPrimary
         }
     }
-    var isLyricsFullscreen by remember { mutableStateOf(false) }
+    var isLyricsFullscreen by remember { mutableStateOf(true) }
 
     var webViewReloadKey by remember { mutableIntStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
@@ -281,7 +277,7 @@ fun MainScreen() {
      */
     val controlsTransitionDuration = 250
     val controlsAlpha by animateFloatAsState(
-        targetValue = if (controlsVisible && isLyricsFullscreen) 1f else 0f,
+        targetValue = if (controlsVisible) 1f else 0f,
         animationSpec = tween(durationMillis = controlsTransitionDuration),
         label = "controlsAlpha"
     )
@@ -299,13 +295,11 @@ fun MainScreen() {
 
     fun resetHideTimer() {
         hideControlsJob?.cancel()
-        if (isLyricsFullscreen) {
-            controlsVisible = true
-            hideControlsJob = scope.launch { delay(3000L); controlsVisible = false }
-        }
+        controlsVisible = true
+        hideControlsJob = scope.launch { delay(3000L); controlsVisible = false }
     }
 
-    AdaptiveStatusBarStyle(useDarkIcons = !isLyricsFullscreen && MaterialTheme.colorScheme.background.luminance() > 0.5f)
+    AdaptiveStatusBarStyle(useDarkIcons = false)
 
     val customLyricsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -347,17 +341,7 @@ fun MainScreen() {
         }
     }
 
-    // 智能退出逻辑：非加载期且无歌词时，延迟退回
-    LaunchedEffect(lyrics, isLoading) {
-        if (!isLoading && lyrics == null && isLyricsFullscreen) {
-            delay(1500)
-            if (isLyricsFullscreen) {
-                isLyricsFullscreen = false
-            }
-        }
-    }
-
-    BackHandler(enabled = isLyricsFullscreen) { isLyricsFullscreen = false }
+    BackHandler(enabled = controlsVisible) { controlsVisible = false }
 
     // 减少轮询频率以降低主线程负担：从每秒一次改为每 5 秒一次。
     LaunchedEffect(Unit) {
@@ -384,9 +368,6 @@ fun MainScreen() {
         }
     }
 
-    val topAppBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
-
     /** 动画数值：共用 Card 实例所需的过渡动画 */
     val cardPaddingH by animateDpAsState(if (isLyricsFullscreen) 0.dp else 16.dp, label = "cardPaddingH")
     val cardPaddingV by animateDpAsState(if (isLyricsFullscreen) 0.dp else 8.dp, label = "cardPaddingV")
@@ -398,62 +379,7 @@ fun MainScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        topBar = {
-            AnimatedVisibility(
-                visible = !isLyricsFullscreen && !isLandscape,
-                enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { -it }),
-                exit = fadeOut(tween(250)) + slideOutVertically(targetOffsetY = { -it })
-            ) {
-                LargeTopAppBar(
-                    title = { Text(text = stringResource(R.string.app_name)) },
-                    actions = {
-                        // AppBar action with anchored M3 DropdownMenu
-                        Box {
-                            val menuInteractionSource = remember { MutableInteractionSource() }
-                            FilledIconButton(
-                                onClick = { showMenu = true },
-                                modifier = Modifier.indication(
-                                    menuInteractionSource,
-                                    ripple(color = rippleColor.value)
-                                ),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurface
-                                )
-                            ) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "菜单")
-                            }
-
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false },
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(24.dp)
-                            ) {
-                                MainMenuDropdownContent(
-                                    nowPlaying = nowPlaying,
-                                    context = context,
-                                    scope = scope,
-                                    viewModel = viewModel,
-                                    isDarkTheme = isDarkTheme,
-                                    initialPrimary = initialPrimary,
-                                    rippleColor = rippleColor,
-                                    customLyricsLauncher = customLyricsLauncher,
-                                    webViewReloadKey = { webViewReloadKey++ },
-                                    onDismiss = { showMenu = false }
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        scrolledContainerColor = MaterialTheme.colorScheme.background
-                    ),
-                    scrollBehavior = scrollBehavior,
-                    modifier = Modifier.statusBarsPadding()
-                )
-            }
-        }
+        topBar = {}
     ) { innerPadding ->
         if (isLandscape) {
             val topPadding = if (isLyricsFullscreen) 0.dp else innerPadding.calculateTopPadding()
@@ -485,17 +411,117 @@ fun MainScreen() {
                         LyricsEmptyState()
                     }
 
-                    if (controlsInLayout) {
-                        IconButton(
-                            onClick = { isLyricsFullscreen = false },
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(top = 40.dp, start = 8.dp)
-                                .alpha(controlsAlpha)
+                    // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                    ) {
+                        AnimatedVisibility(
+                            visible = controlsInLayout || showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading),
+                            enter = fadeIn(tween(controlsTransitionDuration)) + slideInVertically(initialOffsetY = { -it }),
+                            exit = fadeOut(tween(controlsTransitionDuration)) + slideOutVertically(targetOffsetY = { -it })
                         ) {
-                            Icon(Icons.Default.FullscreenExit, contentDescription = "退出全屏", tint = Color.White.copy(alpha = 0.9f))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 56.dp)
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.app_name),
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 12.dp)
+                                )
+                                Box(modifier = Modifier.padding(end = 4.dp)) {
+                                    val menuInteractionSource = remember { MutableInteractionSource() }
+                                    FilledIconButton(
+                                        onClick = { showMenu = true },
+                                        modifier = Modifier.indication(
+                                            menuInteractionSource,
+                                            ripple(color = rippleColor.value)
+                                        ),
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                            contentColor = Color.White
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "菜单")
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showMenu,
+                                        onDismissRequest = { showMenu = false },
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(24.dp)
+                                    ) {
+                                        MainMenuDropdownContent(
+                                            nowPlaying = nowPlaying,
+                                            context = context,
+                                            scope = scope,
+                                            viewModel = viewModel,
+                                            isDarkTheme = isDarkTheme,
+                                            initialPrimary = initialPrimary,
+                                            rippleColor = rippleColor,
+                                            customLyricsLauncher = customLyricsLauncher,
+                                            webViewReloadKey = { webViewReloadKey++ },
+                                            onDismiss = { showMenu = false }
+                                        )
+                                    }
+                                }
+                            }
                         }
 
+                        if (showMatchBubble) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "正在匹配更优歌词",
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    fontSize = 14.sp
+                                )
+                                Button(
+                                    onClick = {
+                                        val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                            putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                            putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                            putExtra(CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE, getAppNameFromPackage(context, nowPlaying?.packageName) ?: "")
+                                        }
+                                        customLyricsLauncher.launch(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text("自选歌词", fontSize = 14.sp) }
+                            }
+                        }
+
+                        if (!notificationAccessGranted) {
+                            PermissionStatusCard(
+                                onOpenNotificationAccessSettings = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    if (controlsInLayout) {
                         nowPlaying?.let { _ ->
                             Column(
                                 modifier = Modifier
@@ -714,28 +740,12 @@ fun MainScreen() {
                 val topPadding = if (isLyricsFullscreen) 0.dp else innerPadding.calculateTopPadding()
                 Spacer(Modifier.height(topPadding))
 
-                if (!notificationAccessGranted && !isLyricsFullscreen) {
-                    PermissionStatusCard(
-                        onOpenNotificationAccessSettings = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
-
                 val currentLyrics = lyrics
                 Card(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = cardPaddingH, vertical = cardPaddingV)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(color = rippleColor.value)
-                        ) {
-                            if (!isLyricsFullscreen) {
-                                isLyricsFullscreen = true
-                            }
-                        },
+                        .padding(horizontal = cardPaddingH, vertical = cardPaddingV),
                     shape = RoundedCornerShape(cardCorner),
                     colors = CardDefaults.cardColors(containerColor = Color.Black)
                 ) {
@@ -765,54 +775,118 @@ fun MainScreen() {
                             LyricsEmptyState()
                         }
 
-                        // 匹配气泡（仅在非全屏显示）
-                        if (!isLyricsFullscreen && showMatchBubble) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                        // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                        ) {
+                            AnimatedVisibility(
+                                visible = controlsInLayout || showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading),
+                                enter = fadeIn(tween(controlsTransitionDuration)) + slideInVertically(initialOffsetY = { -it }),
+                                exit = fadeOut(tween(controlsTransitionDuration)) + slideOutVertically(targetOffsetY = { -it })
                             ) {
-                                Text(
-                                    text = "正在匹配更优歌词",
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontSize = 14.sp
-                                )
-                                Button(
-                                    onClick = {
-                                        val intent = Intent(context, CustomLyricsActivity::class.java).apply {
-                                            putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
-                                            putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
-                                            putExtra(CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE, getAppNameFromPackage(context, nowPlaying?.packageName) ?: "")
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 56.dp)
+                                        .padding(horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.app_name),
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(start = 12.dp)
+                                    )
+                                    Box(modifier = Modifier.padding(end = 4.dp)) {
+                                        val menuInteractionSource = remember { MutableInteractionSource() }
+                                        FilledIconButton(
+                                            onClick = { showMenu = true },
+                                            modifier = Modifier.indication(
+                                                menuInteractionSource,
+                                                ripple(color = rippleColor.value)
+                                            ),
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        ) {
+                                            Icon(Icons.Default.MoreVert, contentDescription = "菜单")
                                         }
-                                        customLyricsLauncher.launch(intent)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) { Text("自选歌词", fontSize = 14.sp) }
+
+                                        DropdownMenu(
+                                            expanded = showMenu,
+                                            onDismissRequest = { showMenu = false },
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = RoundedCornerShape(24.dp)
+                                        ) {
+                                            MainMenuDropdownContent(
+                                                nowPlaying = nowPlaying,
+                                                context = context,
+                                                scope = scope,
+                                                viewModel = viewModel,
+                                                isDarkTheme = isDarkTheme,
+                                                initialPrimary = initialPrimary,
+                                                rippleColor = rippleColor,
+                                                customLyricsLauncher = customLyricsLauncher,
+                                                webViewReloadKey = { webViewReloadKey++ },
+                                                onDismiss = { showMenu = false }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (showMatchBubble) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "正在匹配更优歌词",
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontSize = 14.sp
+                                    )
+                                    Button(
+                                        onClick = {
+                                            val intent = Intent(context, CustomLyricsActivity::class.java).apply {
+                                                putExtra(CustomLyricsActivity.EXTRA_TITLE, nowPlaying?.title ?: "")
+                                                putExtra(CustomLyricsActivity.EXTRA_ARTIST, nowPlaying?.artist ?: "")
+                                                putExtra(CustomLyricsActivity.EXTRA_PLAYBACK_SOURCE, getAppNameFromPackage(context, nowPlaying?.packageName) ?: "")
+                                            }
+                                            customLyricsLauncher.launch(intent)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) { Text("自选歌词", fontSize = 14.sp) }
+                                }
+                            }
+
+                            if (!notificationAccessGranted) {
+                                PermissionStatusCard(
+                                    onOpenNotificationAccessSettings = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
                             }
                         }
 
-                        // 全屏控制按钮
-                        if (isLyricsFullscreen && controlsInLayout) {
-                            IconButton(
-                                onClick = { isLyricsFullscreen = false },
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(top = 40.dp, start = 8.dp)
-                                    .alpha(controlsAlpha)
-                            ) {
-                                Icon(
-                                    Icons.Default.FullscreenExit,
-                                    contentDescription = "退出全屏",
-                                    tint = Color.White.copy(alpha = 0.9f)
-                                )
-                            }
-
+                        // 控制按钮（点击屏幕显示）
+                        if (controlsInLayout) {
                             nowPlaying?.let { _ ->
                                 Column(
                                     modifier = Modifier
@@ -869,45 +943,6 @@ fun MainScreen() {
                     }
                 }
 
-                // 歌曲结构显示条
-                AnimatedVisibility(visible = !isLyricsFullscreen) {
-                    SongStructureBarSection(
-                        isLoading = isLoading,
-                        isSongStructureBarEnabled = isSongStructureBarEnabled,
-                        songStructures = songStructures,
-                        currentStructureIndex = currentStructureIndex,
-                        onSeekTo = { viewModel.seekTo(it) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                // 底部播放卡片
-                AnimatedVisibility(visible = !isLyricsFullscreen) {
-                    NowPlayingCard(
-                        nowPlaying = nowPlaying,
-                        context = context,
-                        songStructures = songStructures,
-                        onPlayPauseClick = { if (nowPlaying?.isPlaying == true) viewModel.pause() else viewModel.play() },
-                        onSkipPreviousClick = {
-                            val currentPos = nowPlaying?.currentPosition ?: 0L
-                            if (AppSettings.isSkipPreviousRewindsEnabled(context) && currentPos > 3000) viewModel.seekTo(0) else viewModel.skipToPrevious()
-                        },
-                        onSkipNextClick = { viewModel.skipToNext() },
-                        onRewind = { viewModel.rewind() },
-                        onFastForward = { viewModel.fastForward() },
-                        onSeek = { viewModel.seekTo(it) },
-                        onCardClick = {
-                            when (AppSettings.getCardClickAction(context)) {
-                                CardClickAction.DIRECT_OPEN -> openSourceApp(context, nowPlaying?.packageName)
-                                CardClickAction.ASK -> showOpenAppDialog = true
-                                else -> {}
-                            }
-                        },
-                        cardBg = cardBg,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp)
-                    )
-                }
-
                 val bottomPadding = if (isLyricsFullscreen) 0.dp else innerPadding.calculateBottomPadding()
                 Spacer(Modifier.height(bottomPadding))
             }
@@ -922,17 +957,23 @@ fun MainScreen() {
                 window?.let { WindowCompat.getInsetsController(it, localView) }
             }
 
+            // 关键提示场景强制常驻时，状态栏也保持可见（与标题栏/更多按钮规则一致）
+            val keepChromeVisible = controlsVisible
+                || showMatchBubble
+                || !notificationAccessGranted
+                || (lyrics == null && !isLoading)
+
             SideEffect {
                 if (activity == null || window == null || insetsController == null) return@SideEffect
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     window.attributes = window.attributes.apply {
-                        layoutInDisplayCutoutMode = if (controlsVisible)
+                        layoutInDisplayCutoutMode = if (keepChromeVisible)
                             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
                         else
                             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                     }
                 }
-                if (controlsVisible) {
+                if (keepChromeVisible) {
                     insetsController.show(WindowInsetsCompat.Type.systemBars())
                 } else {
                     insetsController.hide(WindowInsetsCompat.Type.systemBars())

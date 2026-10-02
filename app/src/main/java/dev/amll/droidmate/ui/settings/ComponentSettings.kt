@@ -5,6 +5,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,13 +31,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSliderState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +63,7 @@ import io.github.zeehan2005.scoremuse.global.NowPlayingMusic
 import io.github.zeehan2005.scoremuse.global.UnifiedLyrics
 import java.io.File
 import java.io.IOException
+import kotlin.time.Duration.Companion.milliseconds
 
 class ComponentSettings : BaseComposeActivity() {
     @Composable
@@ -94,9 +99,9 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
     // 字体设置状态
     var amllFontFamily by remember { mutableStateOf(AMLLSettings.getAmllFontFamily(context)) }
     // 字重与字号状态
-    var fontWeight by remember { mutableStateOf(AMLLSettings.getAmllFontWeight(context) ?: AMLLSettings.DEFAULT_AMLL_FONT_WEIGHT) }
+    var fontWeight by remember { mutableIntStateOf(AMLLSettings.getAmllFontWeight(context) ?: AMLLSettings.DEFAULT_AMLL_FONT_WEIGHT) }
     var useDefaultFontSize by remember { mutableStateOf(AMLLSettings.getAmllLyricFontSize(context) == null) }
-    var lyricFontSize by remember { mutableStateOf(AMLLSettings.getAmllLyricFontSize(context) ?: AMLLSettings.DEFAULT_AMLL_LYRIC_FONT_SIZE) }
+    var lyricFontSize by remember { mutableIntStateOf(AMLLSettings.getAmllLyricFontSize(context) ?: AMLLSettings.DEFAULT_AMLL_LYRIC_FONT_SIZE) }
     var importedFonts by remember {
         mutableStateOf(
             AMLLSettings.getAmllFontFiles(context).filter { File(it.absolutePath).exists() }
@@ -140,7 +145,7 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
     var previewTimeMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(100L)
+            delay(100L.milliseconds)
             previewTimeMs = (previewTimeMs + 100L) % previewDurationMs
         }
     }
@@ -458,16 +463,13 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
             }
-            Slider(
+            Slider(state = rememberSliderState(
                 value = fontWeight.toFloat(),
-                onValueChange = {
-                    fontWeight = it.toInt()
-                    AMLLSettings.setAmllFontWeight(context, fontWeight)
-                },
-                valueRange = 100f..900f,
-                steps = 7,
-                modifier = Modifier.fillMaxWidth()
-            )
+                steps = 7, trackRange = 100f..900f
+            ), modifier = Modifier.fillMaxWidth(), enabled = true, onValueChange = {
+                                fontWeight = it.toInt()
+                                AMLLSettings.setAmllFontWeight(context, fontWeight)
+                            }, onValueChangeFinished = null, colors = SliderDefaults.colors(), interactionSource = remember { MutableInteractionSource() })
 
             // 字号：自适应默认 / 手动指定
             Row(
@@ -493,17 +495,13 @@ private fun ComponentSettingsPage(onBack: () -> Unit) {
                     colors = switchColors
                 )
             }
-            Slider(
+            Slider(state = rememberSliderState(
                 value = lyricFontSize.toFloat(),
-                onValueChange = {
-                    lyricFontSize = it.toInt()
-                    if (!useDefaultFontSize) AMLLSettings.setAmllLyricFontSize(context, lyricFontSize)
-                },
-                valueRange = 12f..48f,
-                steps = 0,
-                enabled = !useDefaultFontSize,
-                modifier = Modifier.fillMaxWidth()
-            )
+                steps = 0, trackRange = 12f..48f
+            ), modifier = Modifier.fillMaxWidth(), enabled = !useDefaultFontSize, onValueChange = {
+                                lyricFontSize = it.toInt()
+                                if (!useDefaultFontSize) AMLLSettings.setAmllLyricFontSize(context, lyricFontSize)
+                            }, onValueChangeFinished = null, colors = SliderDefaults.colors(), interactionSource = remember { MutableInteractionSource() })
 
             // 已导入字体列表
             val sortedFonts = importedFonts.sortedBy { it.fontFamilyName.lowercase() }
