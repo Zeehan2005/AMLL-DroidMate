@@ -408,7 +408,7 @@ fun MainScreen() {
                     )
 
                     if (currentLyrics == null && !isLoading) {
-                        LyricsEmptyState()
+                        LyricsEmptyState(nowPlaying)
                     }
 
                     // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
@@ -723,7 +723,7 @@ fun MainScreen() {
                                 )
 
                                 if (currentLyrics == null && !isLoading) {
-                                    LyricsEmptyState()
+                                    LyricsEmptyState(nowPlaying)
                                 }
 
                                 if (isLoading) {
@@ -772,7 +772,7 @@ fun MainScreen() {
 
                         // 占位提示
                         if (currentLyrics == null && !isLoading) {
-                            LyricsEmptyState()
+                            LyricsEmptyState(nowPlaying)
                         }
 
                         // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
@@ -1153,10 +1153,20 @@ private fun SongStructureBarSection(
     }
 }
 
-/** 歌词为空时的占位提示 */
+/**
+ * 歌词为空时的占位提示。
+ * 底图不在这里画：无歌曲信息 / 无专辑图时 [LyricsVisualLayer] 已把内置占位图
+ * （drawable-anydpi/background_blue_black_light_1591226）交给背景渲染组件渲染。
+ * 这里只补一层压暗蒙版，保证占位图较亮处上的白色文字依然可读。
+ */
 @Composable
-private fun LyricsEmptyState() {
+private fun LyricsEmptyState(nowPlaying: NowPlayingMusic?) {
+    // 与 LyricsVisualLayer 的 effectiveAlbumArtUri 保持一致：无歌曲 / 无专辑图 → 命中占位图
+    val useFallbackArt = nowPlaying == null || nowPlaying.albumArtUri.isNullOrBlank()
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (useFallbackArt) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+        }
         Text(text = "选择歌词来显示", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, textAlign = TextAlign.Center)
     }
 }
@@ -1187,11 +1197,12 @@ fun LyricsVisualLayer(
     val fallbackAlbumArtUri = remember(context) {
         "android.resource://${context.packageName}/drawable/background_blue_black_light_1591226"
     }
-    val effectiveAlbumArtUri = if (nowPlaying == null) {
-        null
-    } else {
-        nowPlaying.albumArtUri ?: fallbackAlbumArtUri
-    }
+    /**
+     * 有效专辑图：无歌曲信息（如「选择歌词来显示」空态）或无专辑图时，
+     * 统一回落到内置占位图，这样背景渲染组件（原生模糊背景 / AMLL WebView 背景渲染器）
+     * 也会用这张占位图渲染，而不是留下一块纯黑。
+     */
+    val effectiveAlbumArtUri = nowPlaying?.albumArtUri?.takeIf { it.isNotBlank() } ?: fallbackAlbumArtUri
 
     /** 优化：使用更高效的状态管理，减少不必要的内存分配 */
     val boxHeight = remember { mutableIntStateOf(0) }
@@ -1224,8 +1235,8 @@ fun LyricsVisualLayer(
                 }
             }
     ) {
-        // 背景图和叠加效果
-        if (useAndroidBlur && effectiveAlbumArtUri != null) {
+        // 背景图和叠加效果（effectiveAlbumArtUri 恒非空：无专辑图时回落内置占位图）
+        if (useAndroidBlur) {
             // 减小模糊半径以降低渲染成本
             AsyncImage(
                 model = effectiveAlbumArtUri,
