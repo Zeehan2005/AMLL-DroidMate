@@ -791,7 +791,8 @@ fun MainScreen() {
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(min = 56.dp)
-                                        .padding(horizontal = 4.dp),
+                                        .padding(horizontal = 4.dp)
+                                        .padding(top = 24.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
