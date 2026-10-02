@@ -6,6 +6,13 @@
   - WebView 样式 → 改 `frontend/styles.css`；前端逻辑 → 改 `frontend/src/`；原生注入桥 → 改 `AMLLLyricsView.kt`（Kotlin，不在 bundle 内）。
 - 沙箱中 `./gradlew` 跑不起来（缺 uname/sed），用 `java -jar gradle/wrapper/gradle-wrapper.jar :app:compileDebugKotlin --offline` 代替。
 
+## 版本号规则与取值（重要）
+- 规则已统一为 SemVer + 渠道后缀：`vX.Y.Z` / `vX.Y.Z-alpha<任意后缀>` / `vX.Y.Z-beta<任意后缀>`（大小写不敏感）。
+  旧的 `Alpha <14位时间戳>` 规则已废弃（9/21 改造时移除），远程 tag 不再按时间戳解析。
+- `app/build.gradle.kts` 中 `customVersion` 供正式版版本号；留空时 `resolveVersionName()` 自动生成开发版 `v0.0.0-alpha<时间戳>`，`versionName` 与 APK 文件名都用它 —— **versionName 永远非空**。
+- 运行期取版本号统一走 `global/AppVersion.kt` 的 `AppVersion.current(context)`（API 33+ 用 `PackageInfoFlags.of(0)`，先 trim 再判空，兜底 `"unknown"`）。
+  - 坑：`packageInfo.versionName ?: "unknown"` 拦不住空串（AGP 写空 versionName 时返回 `""` 而非 null），必须 trim 后判空。
+
 ## 歌词组件特性
 - 字重/字号调节：设置存于 `AMLLSettings`（`getAmllFontWeight`/`getAmllLyricFontSize` 等），由 `AMLLLyricsView` 在 `update` 中注入到 WebView（CSS 变量 `--amll-lp-font-weight` / `--amll-user-font-size`，并直接对 `.amll-lyric-player` 设 inline style 兜底），UI 在 `ComponentSettings.kt`。
 - 核心（`@applemusic-like-lyrics`）通过 `--amll-lp-font-size` 消费字号；`--amll-lp-font-size-preset` 在该版本核心中未被消费，旧 `setLyricSizePreset` 实际无效。

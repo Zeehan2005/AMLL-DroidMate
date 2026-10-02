@@ -58,6 +58,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import io.github.zeehan2005.scoremuse.service.LyricNotificationManager
 import io.github.zeehan2005.scoremuse.global.AppSettings
+import io.github.zeehan2005.scoremuse.global.AppVersion
 import io.github.zeehan2005.scoremuse.ui.settings.ApiTestActivity
 import io.github.zeehan2005.scoremuse.global.CardClickAction
 import io.github.zeehan2005.scoremuse.global.UpdateChannel
@@ -413,7 +414,7 @@ private fun SettingsPage(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        "当前版本: ${getCurrentVersionName(context)}",
+                        "当前版本: ${AppVersion.current(context)}",
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
@@ -746,11 +747,6 @@ private fun formatReleaseTime(instant: Instant): String {
     return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         .withZone(ZoneId.systemDefault())
         .format(instant)
-}
-
-private fun getCurrentVersionName(context: Context): String {
-    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-    return packageInfo.versionName ?: "unknown"
 }
 
 private fun needsNotificationPermission(): Boolean {

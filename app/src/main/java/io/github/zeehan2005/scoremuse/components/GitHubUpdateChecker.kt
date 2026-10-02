@@ -1,6 +1,7 @@
 package io.github.zeehan2005.scoremuse.components
 
 import android.content.Context
+import io.github.zeehan2005.scoremuse.global.AppVersion
 import io.github.zeehan2005.scoremuse.global.UpdateChannel
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -209,8 +210,7 @@ object GitHubUpdateChecker {
     }
 
     private fun getCurrentVersionName(context: Context): String {
-        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        return packageInfo.versionName ?: "unknown"
+        return AppVersion.current(context)
     }
 
     private fun parseInstalledVersion(versionName: String): InstalledVersion {

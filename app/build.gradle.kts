@@ -174,9 +174,27 @@ fun getBuildTimestamp(): String {
     // 格式：yyyyMMddHHmmss (例如：20260401123456)
     return SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())
 }
-/** 正式版版本号 */
+/** 正式版版本号（半版本格式：vX.X.Z，可选 -alpha<后缀> / -beta<后缀> 渠道后缀） */
 val customVersion = ""
-//val customVersion = "Alpha ${getBuildTimestamp()}" // 开发版
+//val customVersion = "v4.3.1-alpha.1" // 正式版示例
+
+/**
+ * 解析最终使用的版本号
+ *
+ * 版本号规则与 GitHubUpdateChecker 的解析规则保持一致：
+ * - 正式版：`vX.Y.Z`（如 v4.3.1，可带 -alpha* / -beta* 后缀）
+ * - 开发版：`customVersion` 留空时自动生成为 `v0.0.0-alpha<时间戳>`
+ *
+ * 必须保证 versionName 非空：旧的 `Alpha <时间戳>` 规则已被 SemVer 取代，
+ * 若 versionName 为空，运行期 getCurrentVersionName() 拿不到有效版本号，
+ * 会导致设置页「当前版本」显示为空、更新检查把本地版本判为无法解析而恒提示「发现新版本」。
+ */
+fun resolveVersionName(): String {
+    val custom = customVersion.trim()
+    if (custom.isNotEmpty()) return custom
+    // 开发版：v 前缀 + SemVer + alpha 渠道后缀，符合 GitHubUpdateChecker 的 alphaRegex
+    return "v0.0.0-alpha+${getBuildTimestamp()}"
+}
 
 // ============================================================================
 // Android 应用配置
@@ -212,8 +230,8 @@ android {
         // 版本号：整数，每次发布递增（Google Play 要求）
         versionCode = 1
         
-        // 版本名称：显示给用户的版本信息（使用时间戳格式）
-        versionName = customVersion
+        // 版本名称：显示给用户的版本信息（SemVer 规则，空 customVersion 时自动生成开发版版本号）
+        versionName = resolveVersionName()
 
     }
 
@@ -252,7 +270,7 @@ androidComponents {
             // 重命名 APK 文件（仅适用于 VariantOutputImpl 类型）
             (output as? com.android.build.api.variant.impl.VariantOutputImpl)?.outputFileName?.set(
                 // 版本号
-                "AMLL-DroidMate-$customVersion.apk" // 正式版
+                "AMLL-DroidMate-${resolveVersionName()}.apk" // 正式版
             )
         }
     }
