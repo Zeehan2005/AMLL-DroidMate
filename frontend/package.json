@@ -18,20 +18,20 @@
     "@applemusic-like-lyrics/lyric": "latest",
     "@pixi/core": "latest",
     "@pixi/utils": "latest",
-    "vite": "latest"
+    "vite": "^8.3.5"
   },
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "esbuild": "^0.28.2",
+    "esbuild": "latest",
     "rollup": "latest",
     "terser": "latest",
     "typescript": "latest",
-    "vite-plugin-top-level-await": "^1.2.2",
+    "vite-plugin-top-level-await": "--latest",
     "vite-plugin-wasm": "latest"
   },
   "allowScripts": {
-    "@swc/core@1.15.40": true,
-    "esbuild@0.28.2": true
+    "@swc/core": true,
+    "esbuild": true
   }
 }
