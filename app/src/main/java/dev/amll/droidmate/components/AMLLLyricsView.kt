@@ -30,8 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import android.os.SystemClock
 import dev.amll.droidmate.global.AMLLSettings
-import io.github.zeehan2005.scoremuse.global.ScreenRefreshRate
 import io.github.zeehan2005.scoremuse.global.UnifiedLyrics
 import io.github.zeehan2005.scoremuse.global.LyricWord
 import org.json.JSONObject
@@ -48,6 +48,9 @@ import kotlin.collections.joinToString
  * AMLL 视图实例计数器：用于输出日志
  */
 private val AMLL_VIEW_INSTANCE_COUNTER = AtomicInteger(0)
+
+/** 原生向 WebView 下发时间锚点的间隔：逐帧推进交给 JS 的 rAF，这里只做低频校准 */
+private const val TIME_ANCHOR_INTERVAL_MS = 200L
 
 /**
  * @param modifier Compose 修饰符（用于调整大小、背景等样式）
@@ -128,24 +131,13 @@ fun AMLLLyricsView(
 
     // ==================== 时间���新节流 ====================
     /**
-     * 记录上一次更新时间的时间戳（用于节流，避免每帧都更新）
+     * 网页版由播放器时钟直接驱动 rAF；这里改为原生只做低频校准（约 5Hz），
+     * WebView 内部用 performance.now() 逐帧推算时间，避免每帧跨语言调用。
      */
-    var lastTimeUpdateTimestamp by remember { mutableLongStateOf(0L) }
-
-    /**
-     * 时间更新间隔（毫秒）- 与屏幕刷新率同步
-     * 根据当前设备的屏幕刷新率动态计算，保证每帧更新一次 JS 时间。
-     * 60Hz → 16ms, 90Hz → 11ms, 120Hz → 8ms
-     */
+    var lastTimeAnchorAt by remember { mutableLongStateOf(0L) }
+    var lastAnchorPlaying by remember { mutableStateOf<Boolean?>(null) }
     val context = LocalContext.current
-    val timeUpdateIntervalMs = remember {
-        ScreenRefreshRate.getFrameIntervalMs(context)
-    }
-    
-    // ==================== 播放状态节流 ====================
-    // 避免每次 recompose 都调用 JS
-    var lastIsPlayingValue by remember { mutableStateOf<Boolean?>(null) }
-    
+
 //    // ==================== 歌词开关状态缓存（用于去重） ====================
 //    var lastTranslationLineEnabled by remember { mutableStateOf<Boolean?>(null) }
 //    var lastRomanLineEnabled by remember { mutableStateOf<Boolean?>(null) }
@@ -301,23 +293,10 @@ fun AMLLLyricsView(
                         instanceId,
                         onLineSeekState.value,
                         onSeekRequested = { seekTime ->
-                            // schedule a UI-thread action so that the webview can immediately
-                            // acknowledge the seek and prevent the "lyrics running around" effect.
-                            // 在 UI 线程上执行跳转，防止歌词乱跑
+                            // 立即重置 WebView 内的本地时钟，避免旧位置导致歌词回滚
                             webViewRef.post {
-                                // tell the JS player we are seeking so it can suspend auto-scroll
-                                // 告诉 JS 播放器正在跳转，暂停自动滚动
                                 webViewRef.evaluateJavascript(
-                                    "window.callPlayer && window.callPlayer('setIsSeeking', true);",
-                                    null
-                                )
-
-                                // update the webview time to the target position right away. this
-                                // reduces the window where the old time would cause the view to
-                                // scroll back to the previous line before the new position arrives
-                                // 立即更新 WebView 时间到新位置，减少旧时间导致的回滚
-                                webViewRef.evaluateJavascript(
-                                    "window.updateTime && window.updateTime($seekTime);",
+                                    "window.seekPlaybackTime && window.seekPlaybackTime($seekTime);",
                                     null
                                 )
                             }
@@ -382,26 +361,21 @@ fun AMLLLyricsView(
                 return@AndroidView
             }
 
-            // ==================== 播放状态同步 ====================
-            /** 优化：使用节流机制，只有真正变化时才更新
-             * 避免因 recompose 频繁调用 JS 导致 UI 线程阻塞 */
+            // ==================== 时间锚点同步 ====================
+            /**
+             * 不再每帧调用 JS：只下发约 5Hz 的锚点（位置 + 播放状态），
+             * WebView 内的 rAF 用本地时钟逐帧推进，播放状态变化则立即同步。
+             */
             val currentIsPlaying = isPlayingState.value
-            if (lastIsPlayingValue != currentIsPlaying) {
-                lastIsPlayingValue = currentIsPlaying
-                // 只在状态真正变化时触发 JS 调用
+            val playingChanged = lastAnchorPlaying != currentIsPlaying
+            val now = SystemClock.elapsedRealtime()
+            if (playingChanged || now - lastTimeAnchorAt >= TIME_ANCHOR_INTERVAL_MS) {
+                lastAnchorPlaying = currentIsPlaying
+                lastTimeAnchorAt = now
                 view.evaluateJavascript(
-                    "window.setPaused && window.setPaused(${!currentIsPlaying});",
+                    "window.syncPlaybackTime && window.syncPlaybackTime({\"p\":$currentTime,\"s\":$currentIsPlaying,\"w\":${System.currentTimeMillis()}});",
                     null
                 )
-            }
-
-
-            // ==================== 更新时间同步（节流优化） ====================
-            /** 仅在时间间隔超过阈值时才更新，避免每帧都调用 JS */
-            val now = System.currentTimeMillis()
-            if (now - lastTimeUpdateTimestamp >= timeUpdateIntervalMs) {
-                view.evaluateJavascript("window.updateTime && window.updateTime($currentTime);", null)
-                lastTimeUpdateTimestamp = now
             }
 
 

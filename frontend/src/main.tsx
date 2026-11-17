@@ -22,7 +22,9 @@ declare global {
   interface Window {
     __amll?: any // 暴露给调试用的内部实例
     updateLyrics?: (payload: any) => void // 更新歌词数据
-    updateTime?: (timeMs: number) => void // 更新当前播放时间
+    updateTime?: (timeMs: number) => void // 兼容旧版：立即跳转到指定时间
+    syncPlaybackTime?: (payload: { p: number; s: boolean } | number) => void // 原生低频时间校准
+    seekPlaybackTime?: (timeMs: number) => void // 跳转（强制重置本地时钟）
     updateAlbumArt?: (uri: string) => Promise<void> // 更新专辑封面
     setPaused?: (paused: boolean) => void // 设置播放/暂停状态
     configureLyricMotion?: (options: any) => void // 配置歌词滚动/动画效果
@@ -65,6 +67,62 @@ const state = {
   isPlaying: false, // 播放状态缓存
   hasPlaybackState: false, // 是否已接收过播放状态
   pendingLyricOptions: {} as Record<string, any>, // 待应用的配置项
+}
+
+/**
+ * 播放时钟：与网页版一致，时间由 WebView 内部的 rAF 逐帧推进。
+ * Android 只提供低频锚点（位置 + 播放状态），不再每帧跨语言调用。
+ */
+const playbackClock = {
+  positionMs: 0,             // 最近一次锚点对应的播放位置
+  anchorPerfMs: 0,           // 锚点对应的 performance.now()
+  wallMs: 0,                 // 原生采样时间戳（仅用于诊断）
+  playing: false,
+  hasAnchor: false,
+  correctionMs: 0,           // 待平滑消除的校准误差
+  correctionStartPerfMs: 0,
+  lastNativePositionMs: Number.NaN, // 上一次原生上报的位置（用于忽略重复采样）
+}
+const CLOCK_CORRECTION_DURATION_MS = 300
+const CLOCK_SEEK_THRESHOLD_MS = 1500
+const CLOCK_MIN_CORRECTION_MS = 40
+
+/** 读取当前帧的播放时间；误差较大时立即重置，小幅误差在 300ms 内平滑消化 */
+function getPlaybackTime(nowPerfMs: number): number {
+  if (!playbackClock.hasAnchor) return state.currentTime > 0 ? state.currentTime : 0
+  let time = playbackClock.positionMs + (playbackClock.playing ? nowPerfMs - playbackClock.anchorPerfMs : 0)
+  const elapsed = nowPerfMs - playbackClock.correctionStartPerfMs
+  if (playbackClock.correctionMs !== 0 && elapsed >= 0 && elapsed < CLOCK_CORRECTION_DURATION_MS) {
+    time += playbackClock.correctionMs * (1 - elapsed / CLOCK_CORRECTION_DURATION_MS)
+  }
+  return Math.max(0, time)
+}
+
+/** 用新的锚点硬重置本地时钟（首帧、播放状态切换或跳转） */
+function resetPlaybackClock(positionMs: number, playing: boolean, nowPerfMs = performance.now()) {
+  playbackClock.positionMs = positionMs
+  playbackClock.anchorPerfMs = nowPerfMs
+  playbackClock.playing = playing
+  playbackClock.hasAnchor = true
+  playbackClock.correctionMs = 0
+  playbackClock.lastNativePositionMs = positionMs
+  state.currentTime = Math.round(positionMs)
+}
+
+/** 播放/暂停状态：只改一次播放器状态，供 setPaused 与 syncPlaybackTime 共用 */
+function applyPlaybackState(playing: boolean) {
+  if (state.hasPlaybackState && state.isPlaying === playing) return
+  state.isPlaying = playing
+  state.hasPlaybackState = true
+  playbackClock.playing = playing
+  const p = state.player
+  if (!p) return
+  try {
+    if (playing) p.resume?.()
+    else p.pause?.()
+  } catch (e) {
+    log(`setPaused error: ${(e as Error).message}`, 'error')
+  }
 }
 
 // 将 Core 挂载到 window 确保全局可用（方便 HMR 或调试）
@@ -190,14 +248,8 @@ function initAMLL() {
           log(`line-click: index=${lineIndex}, start=${startTime}`, 'debug')
           if (startTime === undefined) return
           window.Android?.onLineClick?.(lineIndex, startTime)
-          if (state.player) {
-            if (state.player.setCurrentTime) {
-              state.player.setCurrentTime(startTime, false)
-            } else if (state.player.seek) {
-              state.player.seek(startTime)
-            }
-            state.player.update?.(0)
-          }
+          // 乐观跳转：立即重置本地时钟，下一帧由 rAF 统一渲染
+          window.seekPlaybackTime?.(startTime)
         }
         state.player.addEventListener?.('line-click', onLineClick)
         el?.addEventListener?.('line-click', onLineClick)
@@ -213,20 +265,26 @@ function initAMLL() {
     }
 
     // 暴露内部实例以便调试
-    window.__amll = { player: state.player, backgroundRender: state.background }
+    window.__amll = { player: state.player, backgroundRender: state.background, clock: playbackClock }
 
-    // 启动持续更新循环，用于刷新帧和动画效果
-    // 优化：只在实际播放时才推进播放器 tick，暂停时跳过节省 CPU
+    // 启动持续更新循环：与网页版一致，逐帧从本地时钟推进歌词时间
+    // 原生不再参与逐帧同步，只在低频锚点到来时校准（见 window.syncPlaybackTime）
     let lastTime = performance.now()
     const tick = (now: number) => {
       const delta = now - lastTime
       lastTime = now
-      // 不要仅在播放状态下调用 player.update，否则暂停时用户无法进行正常交互
       if (state.player) {
-        state.player.update(delta)
+        const t = Math.round(getPlaybackTime(now))
+        // 核心库要求 setCurrentTime 尽量频繁；同一毫秒内则不重复触发布局计算
+        if (t !== state.currentTime) {
+          state.currentTime = t
+          const p = state.player
+          if (p.setCurrentTime) p.setCurrentTime(t, false)
+          else if (p.seek) p.seek(t)
+        }
+        // 每帧只推进一次动画：不再在 updateTime 里额外调用 update(0)
+        state.player.update?.(delta)
       }
-      // 背景渲染器仅在有内容变化时需要 update — 静态背景不需要每帧重绘
-      // 由 setAlbum / configureBackgroundEffect 等 API 在内容变更时主动调用
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
@@ -288,33 +346,62 @@ window.updateLyrics = (payload: any) => {
 }
 
 /**
- * 同步播放时间
- * @param timeMs 当前播放位置（毫秒）
+ * 接收原生侧的低频时间锚点（约 5Hz），校准 WebView 内的本地时钟。
+ * 只传位置与播放状态，不触发重绘；逐帧推进完全由 rAF 完成。
  */
-window.updateTime = (timeMs: number) => {
-  // 性能优化：如果处于暂停状态，且已经同步过状态，则忽略细微的时间波动
-  if (state.hasPlaybackState && !state.isPlaying) return
+window.syncPlaybackTime = (payload: any) => {
+  const numeric = typeof payload === 'number'
+  const positionMs = numeric ? payload : payload?.p
+  if (!Number.isFinite(positionMs)) return
+  const playing = numeric ? state.isPlaying : Boolean(payload?.s)
+  const wallMs = numeric ? 0 : Number(payload?.w || 0)
+  const hadState = state.hasPlaybackState
+  const wasPlaying = state.isPlaying
+  applyPlaybackState(playing)
+  const playbackToggled = !hadState || wasPlaying !== playing
 
-  const t = Math.trunc(timeMs)
-  if (state.currentTime === t) return
-  state.currentTime = t
+  const now = performance.now()
+  if (!playbackClock.hasAnchor) {
+    resetPlaybackClock(positionMs, playing, now)
+    playbackClock.wallMs = wallMs
+    return
+  }
 
-  const p = state.player
-  if (!p) return
+  // 原生仍在播放但上报的位置与上次相同 → MediaSession 采样未推进，忽略以免歌词回跳
+  if (!playbackToggled && playing && positionMs === playbackClock.lastNativePositionMs) return
+  playbackClock.lastNativePositionMs = positionMs
+  playbackClock.wallMs = wallMs
 
-  try {
-    // 更新播放器时间
-    if (p.setCurrentTime) {
-      p.setCurrentTime(t, false)
-    } else if (p.seek) {
-      p.seek(t)
-    }
-    // 调用 update(0) 强制渲染当前时间点的帧，但不推进时间
-    p.update?.(0)
-  } catch (e) {
-    log(`updateTime error: ${(e as Error).message}`, 'error')
+  const predicted = getPlaybackTime(now)
+  const error = positionMs - predicted
+  if (playbackToggled || Math.abs(error) >= CLOCK_SEEK_THRESHOLD_MS) {
+    resetPlaybackClock(positionMs, playing, now)
+  } else if (Math.abs(error) >= CLOCK_MIN_CORRECTION_MS) {
+    // 小误差平滑消化，避免每 200ms 一次可见跳动
+    playbackClock.correctionMs = error
+    playbackClock.correctionStartPerfMs = now
   }
 }
+
+/** 立即跳到指定时间（歌词行点击、外部 seek） */
+window.seekPlaybackTime = (timeMs: number) => {
+  if (!Number.isFinite(timeMs)) return
+  const t = Math.trunc(timeMs)
+  const p = state.player
+  if (p) {
+    try {
+      // isSeek=true：让核心库重置滚动状态，避免从旧位置滑回来
+      if (p.setCurrentTime) p.setCurrentTime(t, true)
+      else if (p.seek) p.seek(t)
+    } catch (e) {
+      log(`seekPlaybackTime error: ${(e as Error).message}`, 'error')
+    }
+  }
+  resetPlaybackClock(t, state.isPlaying)
+}
+
+/** 兼容旧接口：等同于 seek */
+window.updateTime = (timeMs: number) => window.seekPlaybackTime?.(timeMs)
 
 /**
  * 更新专辑封面
@@ -368,25 +455,7 @@ window.updateAlbumArt = async (uri: string) => {
  * 控制播放/暂停
  */
 window.setPaused = (paused: boolean) => {
-  const isPlaying = !paused
-  // 如果状态没有变化，则忽略（避免重复调用 pause/resume 产生的性能开销或逻辑抖动）
-  if (state.hasPlaybackState && state.isPlaying === isPlaying) return
-
-  state.isPlaying = isPlaying
-  state.hasPlaybackState = true
-  const p = state.player
-  if (!p) return
-
-  try {
-    if (paused) {
-      p.pause?.()
-    } else {
-      ;(p.resume)?.()
-    }
-    p.update?.(0)
-  } catch (e) {
-    log(`setPaused error: ${(e as Error).message}`, 'error')
-  }
+  applyPlaybackState(!paused)
 }
 
 /**

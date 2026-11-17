@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import io.github.zeehan2005.scoremuse.global.NowPlayingMusic
-import io.github.zeehan2005.scoremuse.global.ScreenRefreshRate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +23,13 @@ import java.io.File
 import java.io.FileOutputStream
 import androidx.core.graphics.scale
 import kotlin.time.Duration.Companion.milliseconds
+
+/**
+ * 轮询间隔（毫秒）。歌词逐帧推进已交给 WebView 内的 rAF 本地时钟，
+ * 这里只需 10Hz 采样即可保证进度条/通知及时更新，避免 120Hz 轮询
+ * 引发 StateFlow 每帧发射与 Compose 重组风暴。
+ */
+private const val MEDIA_POLL_INTERVAL_MS = 100L
 
 /**
  * 媒体信息监听服务 - 获取当前播放的歌曲信息
@@ -64,15 +70,6 @@ class MediaInfoService(private val context: Context) {
 
     /** 缓存上次处理专辑图的歌曲签名 — 歌曲切换时才重新 fetch，避免每轮轮询调用 getBitmap()（昂贵的 binder IPC） */
     private var lastAlbumArtSongKey: String? = null
-
-    /**
-     * 轮询更新间隔（毫秒）- 与屏幕刷新率同步
-     * 根据当前设备的屏幕刷新率动态计算。
-     * 60Hz → 16ms, 90Hz → 11ms, 120Hz → 8ms
-     */
-    private val updateIntervalMs: Long by lazy {
-        ScreenRefreshRate.getFrameIntervalMs(context)
-    }
 
 
 
@@ -446,7 +443,7 @@ class MediaInfoService(private val context: Context) {
         serviceScope.launch {
             while (isActive) {
                 updateMediaInfo()
-                delay(updateIntervalMs.milliseconds)
+                delay(MEDIA_POLL_INTERVAL_MS.milliseconds)
             }
         }
     }
