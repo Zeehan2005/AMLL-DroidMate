@@ -6,5 +6,6 @@ local.properties
 /app/src/main/assets/amll/
 frontend/package-lock.json
 .*/
+*/__pycache__
 !.github/
 !.workbuddy/
