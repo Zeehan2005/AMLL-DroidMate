@@ -17,19 +17,24 @@
 
 // ==================== 插件声明 ====================
 // 这些插件在子模块中使用，但版本在这里统一控制（避免版本冲突）
-plugins {
-    // Android Application 插件：用于编译 Android 应用
-    // version: Android Gradle Plugin 版本，需与 Android Studio 版本匹配
-    // apply false: 仅声明版本，不立即应用（在子模块中按需应用）
-    id("com.android.application") version "9.4.1" apply false
-    
-    // Kotlin 序列化插件：支持 Kotlin 数据类的 JSON/XML 序列化
-    // version: Kotlin 编译器版本
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.3.21" apply false
-    
-    // Jetpack Compose 插件：支持使用 Kotlin 编写声明式 UI
-    // version: Compose 编译器版本
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21" apply false
+//
+
+buildscript {
+    repositories {
+        google()
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        // Android Application 插件：用于编译 Android 应用
+        classpath("com.android.tools.build:gradle:9.5.1")
+
+        // Kotlin 序列化插件：支持 Kotlin 数据类的 JSON/XML 序列化
+        classpath("org.jetbrains.kotlin.plugin.serialization:org.jetbrains.kotlin.plugin.serialization.gradle.plugin:latest.release")
+
+        // Jetpack Compose 插件：支持使用 Kotlin 编写声明式 UI
+        classpath("org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin:latest.release")
+    }
 }
 repositories {
     google()

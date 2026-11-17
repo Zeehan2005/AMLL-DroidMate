@@ -13,6 +13,11 @@ pluginManagement {
         mavenCentral()
     }
 }
+plugins {
+    // 允许 Gradle 通过 Foojay 解析/下载 JDK 工具链，供 updateDaemonJvm 等任务使用
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
 // ==================== 项目基本信息 ====================
 // 根项目名称（用于 IDE 显示和构建输出）
 rootProject.name = "AMLL DroidMate"
