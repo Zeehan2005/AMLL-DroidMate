@@ -14,14 +14,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -107,6 +102,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -115,9 +111,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import io.github.zeehan2005.scoremuse.global.viewmodel.MainViewModel
@@ -299,7 +299,27 @@ fun MainScreen() {
         hideControlsJob = scope.launch { delay(3000L); controlsVisible = false }
     }
 
+    /**
+     * 从其他界面返回主界面时调用：显示控件，但取消后续自动隐藏计时。
+     * 保持常驻，直至用户产生任意操作（各操作入口仍走 [resetHideTimer] 启动 3 秒隐藏）。
+     */
+    fun showControlsAndWaitForInteraction() {
+        hideControlsJob?.cancel()
+        hideControlsJob = null
+        controlsVisible = true
+    }
+
     AdaptiveStatusBarStyle(useDarkIcons = false)
+
+    // 状态栏占位高度：取「若显示时」会占据的高度，与当前显隐无关。
+    // 这样状态栏被 hide() 时顶部内容仍保留同样的顶部间距，不会缩上去，显隐均在原位。
+    val density = LocalDensity.current
+    val insetsHostView = LocalView.current
+    val statusBarInsetTop = remember(density, insetsHostView) {
+        val topPx = ViewCompat.getRootWindowInsets(insetsHostView)
+            ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+        with(density) { topPx.toDp() }
+    }
 
     val customLyricsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -342,6 +362,41 @@ fun MainScreen() {
     }
 
     BackHandler(enabled = controlsVisible) { controlsVisible = false }
+
+    // 从其他界面（设置、自选歌词等）返回主界面时：显示控件但不启动自动隐藏计时，
+    // 保持常驻直到用户产生任意操作。用 ON_PAUSE → ON_RESUME 判定“返回”，
+    // 避免首次进入应用（首次 ON_RESUME、没有经历 ON_PAUSE）时误触发。
+    val mainLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(mainLifecycleOwner) {
+        var pausedByLeaving = false
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> pausedByLeaving = true
+                Lifecycle.Event.ON_RESUME -> {
+                    if (pausedByLeaving) {
+                        pausedByLeaving = false
+                        showControlsAndWaitForInteraction()
+                    }
+                }
+                else -> Unit
+            }
+        }
+        mainLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { mainLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 折叠菜单（更多菜单）展开期间保持控件常驻，避免 3 秒自动隐藏计时到点后
+    // 菜单连同控件一起消失。收起后恢复常规隐藏；用首次标志避免冷启动时
+    // showMenu 初始为 false 误触发计时（冷启动应保持常驻直到用户操作）。
+    var menuHasBeenOpened by remember { mutableStateOf(false) }
+    LaunchedEffect(showMenu) {
+        if (showMenu) {
+            menuHasBeenOpened = true
+            showControlsAndWaitForInteraction()
+        } else if (menuHasBeenOpened) {
+            resetHideTimer()
+        }
+    }
 
     // 减少轮询频率以降低主线程负担：从每秒一次改为每 5 秒一次。
     LaunchedEffect(Unit) {
@@ -412,22 +467,23 @@ fun MainScreen() {
                     }
 
                     // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
+                    // 使用固定状态栏高度 padding：状态栏隐藏时仍保留这块区域，
+                    // 顶部内容不随显隐而上下跳动（显隐均在原位）
                     Column(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .fillMaxWidth()
-                            .statusBarsPadding()
+                            .padding(top = statusBarInsetTop)
                     ) {
-                        AnimatedVisibility(
-                            visible = controlsInLayout || showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading),
-                            enter = fadeIn(tween(controlsTransitionDuration)) + slideInVertically(initialOffsetY = { -it }),
-                            exit = fadeOut(tween(controlsTransitionDuration)) + slideOutVertically(targetOffsetY = { -it })
-                        ) {
+                        // 标题栏与播放卡片共用 controlsAlpha，保证淡入淡出时机与时长完全一致
+                        val persistentTopBar = showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading)
+                        if (controlsInLayout || persistentTopBar) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 56.dp)
-                                    .padding(horizontal = 4.dp),
+                                    .padding(horizontal = 4.dp)
+                                    .alpha(if (persistentTopBar) 1f else controlsAlpha),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
@@ -776,23 +832,24 @@ fun MainScreen() {
                         }
 
                         // 顶部覆盖层：标题栏 + 更多按钮在操作时（点击屏幕）显示；匹配/权限提示常驻
+                        // 使用固定状态栏高度 padding：状态栏隐藏时仍保留这块区域，
+                        // 顶部内容不随显隐而上下跳动（显隐均在原位）
                         Column(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .fillMaxWidth()
-                                .statusBarsPadding()
+                                .padding(top = statusBarInsetTop)
                         ) {
-                            AnimatedVisibility(
-                                visible = controlsInLayout || showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading),
-                                enter = fadeIn(tween(controlsTransitionDuration)) + slideInVertically(initialOffsetY = { -it }),
-                                exit = fadeOut(tween(controlsTransitionDuration)) + slideOutVertically(targetOffsetY = { -it })
-                            ) {
+                            // 标题栏与播放卡片共用 controlsAlpha，保证淡入淡出时机与时长完全一致
+                            val persistentTopBar = showMatchBubble || !notificationAccessGranted || (currentLyrics == null && !isLoading)
+                            if (controlsInLayout || persistentTopBar) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(min = 56.dp)
                                         .padding(horizontal = 4.dp)
-                                        .padding(top = 24.dp),
+                                        .padding(top = 24.dp)
+                                        .alpha(if (persistentTopBar) 1f else controlsAlpha),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
@@ -991,7 +1048,9 @@ fun MainScreen() {
                     insetsController.show(WindowInsetsCompat.Type.systemBars())
                 }
             }
-            LaunchedEffect(Unit) { resetHideTimer() }
+            // 冷启动 / 重新进入全屏时同样保持常驻，直到用户产生任意操作才走 resetHideTimer 启动隐藏。
+            // 与「从其他界面返回」（下面的生命周期监听）共用同一套语义。
+            LaunchedEffect(Unit) { showControlsAndWaitForInteraction() }
         }
 
         // 对话框逻辑
